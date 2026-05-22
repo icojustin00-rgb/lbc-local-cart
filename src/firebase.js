@@ -1,17 +1,19 @@
+// Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
+// Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyAgcigGTgyIcprstvUbTujDyCyKY-dUciY",
-  authDomain: "lbc-local-cart-60928.firebaseapp.com",
-  databaseURL: "https://lbc-local-cart-60928-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "lbc-local-cart-60928",
-  storageBucket: "lbc-local-cart-60928.firebasestorage.app",
-  messagingSenderId: "177709843779",
-  appId: "1:177709843779:web:b516ce6e56c02b3d1d9bf6"
+  apiKey: "AIzaSyDUFzVCjc3kjU9RrQzFu0ntB8EymeaOw9k",
+  authDomain: "lbc-local-cart2.firebaseapp.com",
+  projectId: "lbc-local-cart2",
+  storageBucket: "lbc-local-cart2.firebasestorage.app",
+  messagingSenderId: "4147322474",
+  appId: "1:4147322474:web:f370b48f7eb38b28f6b413"
 };
 
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
 export const db = getFirestore(app);
