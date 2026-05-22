@@ -7,6 +7,7 @@ import { getAuth } from "firebase/auth";
 const firebaseConfig = {
   apiKey: "AIzaSyDUFzVCjc3kjU9RrQzFu0ntB8EymeaOw9k",
   authDomain: "lbc-local-cart2.firebaseapp.com",
+  databaseURL: "https://lbc-local-cart2-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "lbc-local-cart2",
   storageBucket: "lbc-local-cart2.firebasestorage.app",
   messagingSenderId: "4147322474",
