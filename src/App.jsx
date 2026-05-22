@@ -342,7 +342,7 @@ function isWithinShiftNotesWindow(selectedLocation, dateStr, shift) {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("booking");
-  const [page, setPage] = useState("intro");
+  const [page, setPage] = useState("landing");
   const [selectedLocation, setSelectedLocation] = useState(LOCATIONS[0]);
   const [selectedDate, setSelectedDate] = useState(toISODate(new Date()));
   const [selectedShift, setSelectedShift] = useState("");
@@ -1053,20 +1053,33 @@ export default function App() {
   return (
     <div className="app-shell">
       <div className="container">
-        <div className="top-tabs">
-          <button
-            onClick={() => setActiveTab("booking")}
-            className={activeTab === "booking" ? "tab-btn active" : "tab-btn"}
-          >
-            Book Shift
-          </button>
-          <button
-            onClick={() => setActiveTab("monthly")}
-            className={activeTab === "monthly" ? "tab-btn active" : "tab-btn"}
-          >
-            Monthly Schedule
-          </button>
-        </div>
+        {!(activeTab === "booking" && page === "landing") && (
+          <div className="top-tabs">
+            <button
+              onClick={() => {
+                setActiveTab("booking");
+                setPage("landing");
+                setMessage("");
+                setCopyMessage("");
+              }}
+              className="tab-btn"
+            >
+              Home
+            </button>
+            <button
+              onClick={() => setActiveTab("booking")}
+              className={activeTab === "booking" ? "tab-btn active" : "tab-btn"}
+            >
+              Book Shift
+            </button>
+            <button
+              onClick={() => setActiveTab("monthly")}
+              className={activeTab === "monthly" ? "tab-btn active" : "tab-btn"}
+            >
+              Monthly Schedule
+            </button>
+          </div>
+        )}
 
         {isAdminRoute && adminSession && (
           <div className="center-row wrap gap">
@@ -1076,6 +1089,81 @@ export default function App() {
             <button onClick={handleAdminLogout} className="secondary-btn">
               Logout Admin
             </button>
+          </div>
+        )}
+
+        {activeTab === "booking" && page === "landing" && (
+          <div className="landing-page">
+            <div className="landing-hero church-landing">
+              <div className="landing-copy">
+                <div className="landing-kicker">LBC Local Cart Ministry</div>
+                <h1 className="landing-title">Organized service, peaceful scheduling.</h1>
+                <p className="landing-subtitle">
+                  A simple congregation-style board for choosing locations, checking
+                  available shifts, and keeping the cart schedule orderly.
+                </p>
+
+                <div className="landing-service-card">
+                  <span>Today&apos;s Flow</span>
+                  <strong>Location first, then date, then publisher name.</strong>
+                </div>
+
+                <div className="landing-actions">
+                  <button
+                    onClick={() => {
+                      setActiveTab("booking");
+                      setPage("locations");
+                    }}
+                    className="primary-btn large-btn"
+                  >
+                    Enter Schedule
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("monthly")}
+                    className="secondary-btn large-btn"
+                  >
+                    View Month
+                  </button>
+                </div>
+              </div>
+
+              <div className="church-window" aria-hidden="true">
+                <div className="window-arch">
+                  <div className="window-pane pane-gold" />
+                  <div className="window-pane pane-olive" />
+                  <div className="window-pane pane-cream" />
+                  <div className="window-pane pane-rust" />
+                </div>
+                <div className="service-board">
+                  <span className="board-label">Cart Board</span>
+                  <strong>3 Locations</strong>
+                  <span>Kingdom Hall, Kalentong, Greenhills</span>
+                </div>
+                <div className="chapel-note note-top">
+                  <strong>PIN</strong>
+                  <span>Private cancellation</span>
+                </div>
+                <div className="chapel-note note-bottom">
+                  <strong>Monthly</strong>
+                  <span>Ready for screenshots</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="landing-strip">
+              <div>
+                <span>01</span>
+                <strong>Choose cart location</strong>
+              </div>
+              <div>
+                <span>02</span>
+                <strong>Review the calendar</strong>
+              </div>
+              <div>
+                <span>03</span>
+                <strong>Confirm your shift</strong>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1122,7 +1210,7 @@ export default function App() {
             </div>
 
             <div className="center-row">
-              <button className="secondary-btn" onClick={() => setPage("intro")}>
+              <button className="secondary-btn" onClick={() => setPage("landing")}>
                 Back
               </button>
             </div>
