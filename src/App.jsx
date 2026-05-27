@@ -68,6 +68,7 @@ const DEFAULT_PUBLISHERS = [
 
 
 const STORAGE_KEY = "lbc-local-cart-cache";
+const WAITING_LIST_LIMIT = 2;
 
 const ELDER_NAME = "Bro. Edjie Allado";
 const ELDER_MESSENGER = "https://www.facebook.com/edjie.allado";
@@ -176,10 +177,28 @@ function normalizeBookingEntry(entry) {
   };
 }
 
+function isRecord(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
 
 function getShiftBookings(bookingMap, locationName, dateStr, shift) {
-  const raw = bookingMap?.[locationName]?.[dateStr]?.[shift] || [];
+  const raw = bookingMap?.[locationName]?.[dateStr]?.[shift];
+  if (!Array.isArray(raw)) return [];
+
   return raw.map(normalizeBookingEntry).filter((entry) => entry.name);
+}
+
+function promoteWaitingBookings(entries, capacity) {
+  let openSlots =
+    capacity - entries.filter((entry) => entry.status === "booked").length;
+
+  if (openSlots <= 0) return entries;
+
+  return entries.map((entry) => {
+    if (openSlots <= 0 || entry.status !== "waiting") return entry;
+    openSlots -= 1;
+    return { ...entry, status: "booked" };
+  });
 }
 
 function getDaySummary(locationName, dateStr, bookingMap, capacity) {
@@ -226,15 +245,16 @@ function getShiftCardStyle(booked, capacity) {
 }
 
 function getMonthlyEntries(bookingMap, locationName, dateStr) {
-  const dayData = bookingMap?.[locationName]?.[dateStr] || {};
+  const rawDayData = bookingMap?.[locationName]?.[dateStr];
+  const dayData = isRecord(rawDayData) ? rawDayData : {};
   const location = LOCATIONS.find((loc) => loc.name === locationName);
   const shifts = location?.shifts || [];
 
   return shifts
-    .filter((shift) => (dayData[shift] || []).length > 0)
+    .filter((shift) => Array.isArray(dayData[shift]) && dayData[shift].length > 0)
     .map((shift) => ({
       shift,
-      entries: (dayData[shift] || []).map((entry, index) => ({
+      entries: dayData[shift].map((entry, index) => ({
         ...normalizeBookingEntry(entry),
         index,
       })),
@@ -355,13 +375,14 @@ export default function App() {
   const initialSelectedLocation =
     LOCATIONS.find((loc) => loc.id === params.get("location")) || LOCATIONS[0];
   const initialSelectedDate = params.get("date") || toISODate(new Date());
+  const initialSelectedShift = params.get("shift") || "";
   const initialAdminRoute = params.get("admin") === "1";
 
   const [activeTab, setActiveTab] = useState(initialActiveTab);
   const [page, setPage] = useState(initialPage);
   const [selectedLocation, setSelectedLocation] = useState(initialSelectedLocation);
   const [selectedDate, setSelectedDate] = useState(initialSelectedDate);
-  const [selectedShift, setSelectedShift] = useState("");
+  const [selectedShift, setSelectedShift] = useState(initialSelectedShift);
   const [selectedName, setSelectedName] = useState("");
   const [nameQuery, setNameQuery] = useState("");
   const [monthDate, setMonthDate] = useState(new Date());
@@ -384,6 +405,11 @@ export default function App() {
     params.set("page", page);
     params.set("location", selectedLocation?.id || LOCATIONS[0].id);
     params.set("date", selectedDate);
+    if (selectedShift) {
+      params.set("shift", selectedShift);
+    } else {
+      params.delete("shift");
+    }
     window.location.search = params.toString();
   }
 
@@ -410,7 +436,7 @@ export default function App() {
     }
 
     window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
-  }, [activeTab, page, selectedLocation, selectedDate, isAdminRoute]);
+  }, [activeTab, page, selectedLocation, selectedDate, selectedShift, isAdminRoute]);
 
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [pendingCancelEntry, setPendingCancelEntry] = useState(null);
@@ -465,9 +491,14 @@ export default function App() {
     const cached = localStorage.getItem(STORAGE_KEY);
     if (cached) {
       try {
-        setBookingMap(JSON.parse(cached));
+        const parsed = JSON.parse(cached);
+        if (isRecord(parsed)) {
+          setBookingMap(parsed);
+        } else {
+          localStorage.removeItem(STORAGE_KEY);
+        }
       } catch {
-        // ignore bad cache
+        localStorage.removeItem(STORAGE_KEY);
       }
     }
 
@@ -481,8 +512,9 @@ export default function App() {
         if (snap.exists()) {
           const data = snap.data() || {};
           setFirestoreConnected(true);
-          setBookingMap(data);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+          const nextData = isRecord(data) ? data : {};
+          setBookingMap(nextData);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
         } else {
           try {
             await setDoc(bookingsRef, {}, { merge: true });
@@ -571,6 +603,12 @@ export default function App() {
     setMonthlyCancelConfirmOpen(false);
   }, [selectedLocation, monthDate]);
 
+  useEffect(() => {
+    if (activeTab === "booking" && page === "names" && !selectedShift) {
+      setPage("details");
+    }
+  }, [activeTab, page, selectedShift]);
+
   const calendarCells = useMemo(() => getCalendarGrid(monthDate), [monthDate]);
 
   const filteredNames = useMemo(() => {
@@ -590,6 +628,8 @@ export default function App() {
   }, [nameQuery]);
 
   const selectedShiftBookings = useMemo(() => {
+    if (!selectedShift) return [];
+
     return getShiftBookings(
       bookingMap,
       selectedLocation.name,
@@ -752,9 +792,21 @@ export default function App() {
     if (!(isAdminRoute && adminSession)) return;
     if (selectedMonthlyBookings.length === 0) return;
 
-    const nextBookingMap = JSON.parse(JSON.stringify(bookingMap || {}));
+    const nextBookingMap = isRecord(bookingMap)
+      ? JSON.parse(JSON.stringify(bookingMap))
+      : {};
 
-    selectedMonthlyBookings.forEach((key) => {
+    [...selectedMonthlyBookings]
+      .sort((a, b) => {
+        const [aLocation, aDate, aShift, aIndex] = a.split("|||");
+        const [bLocation, bDate, bShift, bIndex] = b.split("|||");
+        const aGroup = `${aLocation}|||${aDate}|||${aShift}`;
+        const bGroup = `${bLocation}|||${bDate}|||${bShift}`;
+
+        if (aGroup !== bGroup) return aGroup.localeCompare(bGroup);
+        return Number(bIndex) - Number(aIndex);
+      })
+      .forEach((key) => {
       const [locationName, dateStr, shift, indexStr] = key.split("|||");
       const entryIndex = Number(indexStr);
 
@@ -762,12 +814,20 @@ export default function App() {
       if (!Array.isArray(shiftEntries)) return;
 
       shiftEntries.splice(entryIndex, 1);
+      nextBookingMap[locationName][dateStr][shift] = promoteWaitingBookings(
+        shiftEntries,
+        LOCATIONS.find((loc) => loc.name === locationName)?.capacity || 0
+      );
     });
 
     Object.keys(nextBookingMap).forEach((locationName) => {
-      const locationData = nextBookingMap[locationName] || {};
+      const locationData = isRecord(nextBookingMap[locationName])
+        ? nextBookingMap[locationName]
+        : {};
       Object.keys(locationData).forEach((dateStr) => {
-        const dateData = locationData[dateStr] || {};
+        const dateData = isRecord(locationData[dateStr])
+          ? locationData[dateStr]
+          : {};
         Object.keys(dateData).forEach((shift) => {
           if (Array.isArray(dateData[shift]) && dateData[shift].length === 0) {
             delete dateData[shift];
@@ -937,7 +997,13 @@ export default function App() {
     }
 
     const bookedCount = currentShiftBookings.filter((e) => e.status === "booked").length;
+    const waitingCount = currentShiftBookings.filter((e) => e.status === "waiting").length;
     const isFull = bookedCount >= selectedLocation.capacity;
+
+    if (isFull && waitingCount >= WAITING_LIST_LIMIT) {
+      setMessage("This shift and waiting list are already full.");
+      return;
+    }
 
     const newEntry = {
       name: pickedName,
@@ -1009,13 +1075,18 @@ export default function App() {
       (_, index) => index !== pendingCancelIndex
     );
 
+    const nextBookingList = promoteWaitingBookings(
+      nextBookings,
+      selectedLocation.capacity
+    );
+
     const nextBookingMap = {
       ...bookingMap,
       [selectedLocation.name]: {
         ...(bookingMap[selectedLocation.name] || {}),
         [selectedDate]: {
           ...((bookingMap[selectedLocation.name] || {})[selectedDate] || {}),
-          [selectedShift]: nextBookings,
+          [selectedShift]: nextBookingList,
         },
       },
     };
@@ -1049,13 +1120,18 @@ export default function App() {
       (_, index) => index !== pendingCancelIndex
     );
 
+    const nextBookingList = promoteWaitingBookings(
+      nextBookings,
+      selectedLocation.capacity
+    );
+
     const nextBookingMap = {
       ...bookingMap,
       [selectedLocation.name]: {
         ...(bookingMap[selectedLocation.name] || {}),
         [selectedDate]: {
           ...((bookingMap[selectedLocation.name] || {})[selectedDate] || {}),
-          [selectedShift]: nextBookings,
+          [selectedShift]: nextBookingList,
         },
       },
     };
@@ -1256,14 +1332,12 @@ export default function App() {
           <div className="section-wrap wide">
             <div className="section-header compact">
               <h2 className="upper">Manage Names</h2>
-              <div className="sub-strong">Publisher names (Firestore)</div>
+              <div className="sub-strong">Publisher names</div>
               <div className="sub-muted">Adds/removes names stored at cart/publishers.names</div>
             </div>
             <div style={{ padding: 0, margin: "0 16px 12px 16px" }}>
               <div className="sub-muted" style={{ fontSize: 13 }}>
-                Admin hint: To promote someone from the waiting list, remove a booked entry
-                and then change the waiting entry to a booked entry via the Firestore console
-                or your admin workflow. Auto-promotion isn't performed by the app yet.
+                Use this page to keep the publisher search list up to date.
               </div>
             </div>
 
@@ -1504,20 +1578,7 @@ export default function App() {
                 ⓘ REMINDERS
               </button>
               <div className="date-title">{longDateLabel(selectedDate)}</div>
-          <div className="center-row gap" style={{ marginTop: 10 }}>
-            <span className={firestoreConnected ? "status-dot success" : "status-dot error"}>
-              {firestoreConnected ? "Firestore connected" : "Firestore disconnected"}
-            </span>
-            {!firestoreConnected && (
-              <button
-                type="button"
-                className="secondary-btn small-btn"
-                onClick={initFirestoreBookings}
-              >
-                Init bookings doc
-              </button>
-            )}
-          </div>
+
             </div>
 
             {renderMaintenanceBanner()}
@@ -1554,9 +1615,15 @@ export default function App() {
                       <button
                         onClick={() => chooseShift(shift)}
                         className="primary-btn small-btn"
+                        disabled={
+                          bookedCount >= selectedLocation.capacity &&
+                          waitingCount >= WAITING_LIST_LIMIT
+                        }
                       >
                         {bookedCount >= selectedLocation.capacity
-                          ? "Join Waiting List"
+                          ? waitingCount >= WAITING_LIST_LIMIT
+                            ? "Full"
+                            : "Join Waiting List"
                           : "Book for This Shift"}
                       </button>
                     </div>
@@ -1618,9 +1685,17 @@ export default function App() {
                 className="search-input"
               />
 
-              {selectedShiftBookings.filter((e) => e.status === "booked").length >= selectedLocation.capacity && (
+              {selectedShiftBookings.filter((e) => e.status === "booked").length >= selectedLocation.capacity &&
+                selectedShiftBookings.filter((e) => e.status === "waiting").length < WAITING_LIST_LIMIT && (
                 <div className="empty-box">
-                  This shift is full. You may join the waiting list in case someone cancels.
+                  This shift is full. You may join the waiting list.
+                </div>
+              )}
+
+              {selectedShiftBookings.filter((e) => e.status === "booked").length >= selectedLocation.capacity &&
+                selectedShiftBookings.filter((e) => e.status === "waiting").length >= WAITING_LIST_LIMIT && (
+                <div className="empty-box">
+                  This shift and waiting list are already full.
                 </div>
               )}
 
