@@ -42,7 +42,7 @@ const LOCATIONS = [
   },
 ];
 
-const PUBLISHERS = [
+const DEFAULT_PUBLISHERS = [
   "Alex Balin",
   "Crystal Balin",
   "Edjie Allado",
@@ -65,6 +65,7 @@ const PUBLISHERS = [
   "Richie Reyes",
   "Roma Allado",
 ].sort((a, b) => a.localeCompare(b));
+
 
 const STORAGE_KEY = "lbc-local-cart-cache";
 
@@ -163,6 +164,7 @@ function normalizeBookingEntry(entry) {
       name: entry,
       pin: "",
       bookedAt: null,
+      status: "booked",
     };
   }
 
@@ -170,8 +172,10 @@ function normalizeBookingEntry(entry) {
     name: entry?.name || "",
     pin: entry?.pin || "",
     bookedAt: entry?.bookedAt || null,
+    status: entry?.status || "booked",
   };
 }
+
 
 function getShiftBookings(bookingMap, locationName, dateStr, shift) {
   const raw = bookingMap?.[locationName]?.[dateStr]?.[shift] || [];
@@ -182,8 +186,8 @@ function getDaySummary(locationName, dateStr, bookingMap, capacity) {
   const location = LOCATIONS.find((loc) => loc.name === locationName);
   const shifts = location?.shifts || [];
 
-  const counts = shifts.map(
-    (shift) => getShiftBookings(bookingMap, locationName, dateStr, shift).length
+  const counts = shifts.map((shift) =>
+    getShiftBookings(bookingMap, locationName, dateStr, shift).filter((e) => e.status === "booked").length
   );
   const total = counts.reduce((a, b) => a + b, 0);
   const hasBookings = total > 0;
@@ -341,22 +345,72 @@ function isWithinShiftNotesWindow(selectedLocation, dateStr, shift) {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState("booking");
-  const [page, setPage] = useState("landing");
-  const [selectedLocation, setSelectedLocation] = useState(LOCATIONS[0]);
-  const [selectedDate, setSelectedDate] = useState(toISODate(new Date()));
+  const params =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search)
+      : new URLSearchParams();
+
+  const initialActiveTab = params.get("tab") || "booking";
+  const initialPage = params.get("page") || "landing";
+  const initialSelectedLocation =
+    LOCATIONS.find((loc) => loc.id === params.get("location")) || LOCATIONS[0];
+  const initialSelectedDate = params.get("date") || toISODate(new Date());
+  const initialAdminRoute = params.get("admin") === "1";
+
+  const [activeTab, setActiveTab] = useState(initialActiveTab);
+  const [page, setPage] = useState(initialPage);
+  const [selectedLocation, setSelectedLocation] = useState(initialSelectedLocation);
+  const [selectedDate, setSelectedDate] = useState(initialSelectedDate);
   const [selectedShift, setSelectedShift] = useState("");
   const [selectedName, setSelectedName] = useState("");
   const [nameQuery, setNameQuery] = useState("");
   const [monthDate, setMonthDate] = useState(new Date());
   const [bookingMap, setBookingMap] = useState({});
   const [maintenanceMap, setMaintenanceMap] = useState({});
+  const [publishers, setPublishers] = useState(DEFAULT_PUBLISHERS);
   const [message, setMessage] = useState("");
   const [searchTouched, setSearchTouched] = useState(false);
   const [copyMessage, setCopyMessage] = useState("");
+  const [firestoreConnected, setFirestoreConnected] = useState(false);
   const [recentBooking, setRecentBooking] = useState(null);
+  const [isAdminRoute, setIsAdminRoute] = useState(initialAdminRoute);
   const [issueText, setIssueText] = useState("");
   const [remindersOpen, setRemindersOpen] = useState(false);
+
+  function goToAdminPage() {
+    const params = new URLSearchParams(window.location.search);
+    params.set("admin", "1");
+    params.set("tab", activeTab);
+    params.set("page", page);
+    params.set("location", selectedLocation?.id || LOCATIONS[0].id);
+    params.set("date", selectedDate);
+    window.location.search = params.toString();
+  }
+
+  function exitAdminMode() {
+    setIsAdminRoute(false);
+    const params = new URLSearchParams(window.location.search);
+    params.delete("admin");
+    window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
+  }
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const params = new URLSearchParams(window.location.search);
+    params.set("tab", activeTab);
+    params.set("page", page);
+    params.set("location", selectedLocation?.id || LOCATIONS[0].id);
+    params.set("date", selectedDate);
+
+    if (isAdminRoute) {
+      params.set("admin", "1");
+    } else {
+      params.delete("admin");
+    }
+
+    window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
+  }, [activeTab, page, selectedLocation, selectedDate, isAdminRoute]);
 
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [pendingCancelEntry, setPendingCancelEntry] = useState(null);
@@ -369,14 +423,12 @@ export default function App() {
   const [adminError, setAdminError] = useState("");
   const [adminSession, setAdminSession] = useState(false);
   const [adminDisplayName, setAdminDisplayName] = useState("");
+  const [newPublisherName, setNewPublisherName] = useState("");
 
   const [selectedMonthlyBookings, setSelectedMonthlyBookings] = useState([]);
   const [monthlyCancelConfirmOpen, setMonthlyCancelConfirmOpen] = useState(false);
 
   const pinCardRef = useRef(null);
-
-  const isAdminRoute =
-    typeof window !== "undefined" && window.location.search.includes("admin=1");
 
   const currentShifts = useMemo(() => {
     return selectedLocation?.shifts || [];
@@ -393,6 +445,22 @@ export default function App() {
     );
   }, [selectedLocation, selectedDate, selectedShift]);
 
+  async function initFirestoreBookings() {
+    const bookingsRef = doc(db, "cart", "bookings");
+
+    try {
+      await setDoc(bookingsRef, {}, { merge: true });
+      setFirestoreConnected(true);
+      setMessage("Firestore booking document initialized.");
+    } catch (error) {
+      console.error("Error initializing Firestore bookings:", error);
+      setFirestoreConnected(false);
+      setMessage(
+        "Could not initialize Firestore bookings. Please check rules or project config."
+      );
+    }
+  }
+
   useEffect(() => {
     const cached = localStorage.getItem(STORAGE_KEY);
     if (cached) {
@@ -405,22 +473,37 @@ export default function App() {
 
     const bookingsRef = doc(db, "cart", "bookings");
     const maintenanceRef = doc(db, "cart", "maintenanceNotes");
+    const publishersRef = doc(db, "cart", "publishers");
 
     const unsubscribeBookings = onSnapshot(
       bookingsRef,
       async (snap) => {
         if (snap.exists()) {
           const data = snap.data() || {};
+          setFirestoreConnected(true);
           setBookingMap(data);
           localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
         } else {
-          await setDoc(bookingsRef, {});
-          setBookingMap({});
-          localStorage.setItem(STORAGE_KEY, JSON.stringify({}));
+          try {
+            await setDoc(bookingsRef, {}, { merge: true });
+            setFirestoreConnected(true);
+            setBookingMap({});
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({}));
+          } catch (error) {
+            console.error("Error creating bookings document:", error);
+            setFirestoreConnected(false);
+            setMessage(
+              "Cannot initialize Firestore bookings. Check console / Firestore access."
+            );
+          }
         }
       },
       (error) => {
         console.error("Error listening to bookings:", error);
+        setFirestoreConnected(false);
+        setMessage(
+          "Firestore bookings sync failed. Please check your Firestore rules and project settings."
+        );
       }
     );
 
@@ -439,9 +522,31 @@ export default function App() {
       }
     );
 
+    const unsubscribePublishers = onSnapshot(
+      publishersRef,
+      async (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() || {};
+          const names = Array.isArray(data.names) ? data.names.filter(Boolean).sort((a, b) => a.localeCompare(b)) : DEFAULT_PUBLISHERS;
+          setPublishers(names);
+        } else {
+          try {
+            await setDoc(publishersRef, { names: DEFAULT_PUBLISHERS }, { merge: true });
+            setPublishers(DEFAULT_PUBLISHERS);
+          } catch (error) {
+            console.error("Error creating publishers document:", error);
+          }
+        }
+      },
+      (error) => {
+        console.error("Error listening to publishers:", error);
+      }
+    );
+
     return () => {
       unsubscribeBookings();
       unsubscribeMaintenance();
+      unsubscribePublishers();
     };
   }, []);
 
@@ -472,7 +577,7 @@ export default function App() {
     const q = nameQuery.trim().toLowerCase();
     if (!q) return [];
 
-    return PUBLISHERS.filter((name) => {
+    return publishers.filter((name) => {
       const normal = name.toLowerCase();
       const parts = name.trim().split(" ");
       const lastNameFirst =
@@ -519,6 +624,39 @@ export default function App() {
       setAdminDisplayName("");
     } catch (error) {
       console.error("Admin logout failed:", error);
+    }
+  }
+
+  async function addPublisher() {
+    const name = newPublisherName.trim();
+    if (!name) {
+      setMessage("Please enter a publisher name.");
+      return;
+    }
+
+    const next = Array.from(new Set([...(publishers || []), name])).sort((a, b) => a.localeCompare(b));
+
+    try {
+      const ref = doc(db, "cart", "publishers");
+      await setDoc(ref, { names: next });
+      setNewPublisherName("");
+      setMessage("Publisher list updated.");
+    } catch (error) {
+      console.error("Error updating publishers:", error);
+      setMessage("Failed to update publishers.");
+    }
+  }
+
+  async function removePublisher(name) {
+    const next = (publishers || []).filter((n) => n !== name);
+
+    try {
+      const ref = doc(db, "cart", "publishers");
+      await setDoc(ref, { names: next });
+      setMessage("Publisher removed.");
+    } catch (error) {
+      console.error("Error removing publisher:", error);
+      setMessage("Failed to remove publisher.");
     }
   }
 
@@ -793,21 +931,19 @@ export default function App() {
       selectedDate,
       selectedShift
     );
-
     if (currentShiftBookings.some((entry) => entry.name === pickedName)) {
-      setMessage("You are already booked in this shift.");
+      setMessage("You are already booked or on the waiting list for this shift.");
       return;
     }
 
-    if (currentShiftBookings.length >= selectedLocation.capacity) {
-      setMessage("This shift is already full.");
-      return;
-    }
+    const bookedCount = currentShiftBookings.filter((e) => e.status === "booked").length;
+    const isFull = bookedCount >= selectedLocation.capacity;
 
     const newEntry = {
       name: pickedName,
       pin: generatePin(),
       bookedAt: new Date().toISOString(),
+      status: isFull ? "waiting" : "booked",
     };
 
     const nextBookingMap = {
@@ -827,7 +963,9 @@ export default function App() {
     setNameQuery("");
     setSearchTouched(false);
     setRecentBooking(newEntry);
-    setMessage(`${pickedName} booked successfully.`);
+    setMessage(
+      isFull ? `${pickedName} joined the waiting list.` : `${pickedName} booked successfully.`
+    );
 
     try {
       const ref = doc(db, "cart", "bookings");
@@ -1053,6 +1191,20 @@ export default function App() {
   return (
     <div className="app-shell">
       <div className="container">
+        {!isAdminRoute && (
+          <div className="center-row" style={{ justifyContent: "flex-end", marginBottom: 16 }}>
+            <button type="button" className="secondary-btn small-btn" onClick={goToAdminPage}>
+              Admin
+            </button>
+          </div>
+        )}
+        {isAdminRoute && adminSession && (
+          <div className="center-row" style={{ justifyContent: "flex-end", marginBottom: 16 }}>
+            <button type="button" className="secondary-btn small-btn" onClick={exitAdminMode}>
+              Exit Admin
+            </button>
+          </div>
+        )}
         {!(activeTab === "booking" && page === "landing") && (
           <div className="top-tabs">
             <button
@@ -1078,6 +1230,14 @@ export default function App() {
             >
               Monthly Schedule
             </button>
+            {isAdminRoute && adminSession && (
+              <button
+                onClick={() => setActiveTab("manageNames")}
+                className={activeTab === "manageNames" ? "tab-btn active" : "tab-btn"}
+              >
+                Manage Names
+              </button>
+            )}
           </div>
         )}
 
@@ -1089,6 +1249,53 @@ export default function App() {
             <button onClick={handleAdminLogout} className="secondary-btn">
               Logout Admin
             </button>
+          </div>
+        )}
+
+        {isAdminRoute && adminSession && activeTab === "manageNames" && (
+          <div className="section-wrap wide">
+            <div className="section-header compact">
+              <h2 className="upper">Manage Names</h2>
+              <div className="sub-strong">Publisher names (Firestore)</div>
+              <div className="sub-muted">Adds/removes names stored at cart/publishers.names</div>
+            </div>
+            <div style={{ padding: 0, margin: "0 16px 12px 16px" }}>
+              <div className="sub-muted" style={{ fontSize: 13 }}>
+                Admin hint: To promote someone from the waiting list, remove a booked entry
+                and then change the waiting entry to a booked entry via the Firestore console
+                or your admin workflow. Auto-promotion isn't performed by the app yet.
+              </div>
+            </div>
+
+            <div style={{ padding: 16 }}>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  type="text"
+                  value={newPublisherName}
+                  onChange={(e) => setNewPublisherName(e.target.value)}
+                  placeholder="Type publisher name"
+                  className="search-input"
+                />
+                <button onClick={addPublisher} className="primary-btn">
+                  Add Publisher
+                </button>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                {(publishers || []).length === 0 ? (
+                  <div className="empty-box">No publishers yet.</div>
+                ) : (
+                  (publishers || []).map((name) => (
+                    <div key={name} className="monthly-name-chip" style={{ display: "inline-flex", alignItems: "center", margin: 6 }}>
+                      <span style={{ marginRight: 8 }}>{name}</span>
+                      <button onClick={() => removePublisher(name)} className="danger-btn small-btn">
+                        Remove
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
         )}
 
@@ -1138,14 +1345,6 @@ export default function App() {
                   <span className="board-label">Cart Board</span>
                   <strong>3 Locations</strong>
                   <span>Kingdom Hall, Kalentong, Greenhills</span>
-                </div>
-                <div className="chapel-note note-top">
-                  <strong>PIN</strong>
-                  <span>Private cancellation</span>
-                </div>
-                <div className="chapel-note note-bottom">
-                  <strong>Monthly</strong>
-                  <span>Ready for screenshots</span>
                 </div>
               </div>
             </div>
@@ -1305,24 +1504,36 @@ export default function App() {
                 ⓘ REMINDERS
               </button>
               <div className="date-title">{longDateLabel(selectedDate)}</div>
-              {message ? <div className="success-text">{message}</div> : null}
+          <div className="center-row gap" style={{ marginTop: 10 }}>
+            <span className={firestoreConnected ? "status-dot success" : "status-dot error"}>
+              {firestoreConnected ? "Firestore connected" : "Firestore disconnected"}
+            </span>
+            {!firestoreConnected && (
+              <button
+                type="button"
+                className="secondary-btn small-btn"
+                onClick={initFirestoreBookings}
+              >
+                Init bookings doc
+              </button>
+            )}
+          </div>
             </div>
 
             {renderMaintenanceBanner()}
 
             <div className="shift-list">
               {currentShifts.map((shift) => {
-                const booked = getShiftBookings(
+                const entries = getShiftBookings(
                   bookingMap,
                   selectedLocation.name,
                   selectedDate,
                   shift
-                ).length;
-                const remaining = Math.max(
-                  0,
-                  selectedLocation.capacity - booked
                 );
-                const style = getShiftCardStyle(booked, selectedLocation.capacity);
+                const bookedCount = entries.filter((e) => e.status === "booked").length;
+                const waitingCount = entries.filter((e) => e.status === "waiting").length;
+                const remaining = Math.max(0, selectedLocation.capacity - bookedCount);
+                const style = getShiftCardStyle(bookedCount, selectedLocation.capacity);
 
                 return (
                   <div key={shift} className="shift-card">
@@ -1330,7 +1541,12 @@ export default function App() {
                     <div className="shift-body">
                       <div className="shift-time">{shift}</div>
                       <div className="shift-remaining">
-                        {remaining} slot(s) remaining
+                        {bookedCount}/{selectedLocation.capacity} booked
+                        {waitingCount > 0 && (
+                          <div className="sub-muted" style={{ fontSize: 12, marginTop: 4 }}>
+                            {waitingCount} waiting
+                          </div>
+                        )}
                       </div>
                       <div className={`shift-badge ${style.badgeClass}`}>
                         {style.badge}
@@ -1339,8 +1555,8 @@ export default function App() {
                         onClick={() => chooseShift(shift)}
                         className="primary-btn small-btn"
                       >
-                        {booked >= selectedLocation.capacity
-                          ? "View"
+                        {bookedCount >= selectedLocation.capacity
+                          ? "Join Waiting List"
                           : "Book for This Shift"}
                       </button>
                     </div>
@@ -1402,16 +1618,13 @@ export default function App() {
                 className="search-input"
               />
 
-              {selectedShiftBookings.length >= selectedLocation.capacity && (
+              {selectedShiftBookings.filter((e) => e.status === "booked").length >= selectedLocation.capacity && (
                 <div className="empty-box">
-                  This shift is already full. You may still view the booked names or cancel an existing booking if needed.
+                  This shift is full. You may join the waiting list in case someone cancels.
                 </div>
               )}
 
-              {searchTouched &&
-                nameQuery.trim() !== "" &&
-                !selectedName &&
-                selectedShiftBookings.length < selectedLocation.capacity && (
+              {searchTouched && nameQuery.trim() !== "" && !selectedName && (
                   <div className="search-results">
                     {filteredNames.length === 0 ? (
                       <div className="empty-box">No matching names.</div>
@@ -1429,7 +1642,7 @@ export default function App() {
                   </div>
                 )}
 
-              {selectedName && selectedShiftBookings.length < selectedLocation.capacity && (
+              {selectedName && (
                 <div className="confirm-box">
                   <div className="confirm-title">
                     Confirm booking for this shift?
@@ -1495,19 +1708,39 @@ export default function App() {
                 <div className="success-text center">{message}</div>
               ) : null}
 
-              {selectedShiftBookings.length > 0 && (
+              {(selectedShiftBookings.filter((e) => e.status === "booked").length > 0 || selectedShiftBookings.filter((e) => e.status === "waiting").length > 0) && (
                 <div className="booked-box">
-                  <div className="booked-title">Booked for this shift</div>
-                  {selectedShiftBookings.map((entry, index) => (
-                    <button
-                      key={`${entry.name}-${entry.bookedAt || index}`}
-                      onClick={() => openCancelModal(entry, index)}
-                      className="booked-row"
-                    >
-                      <span>{entry.name}</span>
-                      <span className="cancel-red">❌ Cancel</span>
-                    </button>
-                  ))}
+                  {selectedShiftBookings.filter((e) => e.status === "booked").length > 0 && (
+                    <div>
+                      <div className="booked-title">Booked for this shift</div>
+                      {selectedShiftBookings.filter((e) => e.status === "booked").map((entry) => (
+                        <button
+                          key={`${entry.name}-${entry.bookedAt || Math.random()}`}
+                          onClick={() => openCancelModal(entry, selectedShiftBookings.findIndex((it) => it === entry))}
+                          className="booked-row"
+                        >
+                          <span>{entry.name}</span>
+                          <span className="cancel-red">❌ Cancel</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {selectedShiftBookings.filter((e) => e.status === "waiting").length > 0 && (
+                    <div style={{ marginTop: 12 }}>
+                      <div className="booked-title">Waiting List</div>
+                      {selectedShiftBookings.filter((e) => e.status === "waiting").map((entry, index) => (
+                        <button
+                          key={`${entry.name}-waiting-${entry.bookedAt || index}`}
+                          onClick={() => openCancelModal(entry, selectedShiftBookings.findIndex((it) => it === entry))}
+                          className="booked-row"
+                        >
+                          <span>{entry.name}</span>
+                          <span className="cancel-red">❌ Remove</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1609,47 +1842,85 @@ export default function App() {
                               {compactShiftLabel(entry.shift)}
                             </div>
                             <div className="month-entry-names">
-                              {entry.entries.map((person) => {
-                                const selected = isMonthlyBookingSelected(
-                                  selectedLocation.name,
-                                  iso,
-                                  entry.shift,
-                                  person.index
-                                );
-
-                                if (isAdminRoute && adminSession) {
-                                  return (
-                                    <button
-                                      key={`${person.name}-${person.index}`}
-                                      type="button"
-                                      onClick={() =>
-                                        toggleMonthlyBookingSelection(
-                                          selectedLocation.name,
-                                          iso,
-                                          entry.shift,
-                                          person.index
-                                        )
-                                      }
-                                      className={
-                                        selected
-                                          ? "monthly-name-chip selected"
-                                          : "monthly-name-chip"
-                                      }
-                                    >
-                                      {person.name}
-                                    </button>
-                                  );
-                                }
+                              {(() => {
+                                const booked = entry.entries.filter((p) => p.status === "booked");
+                                const waiting = entry.entries.filter((p) => p.status === "waiting");
 
                                 return (
-                                  <span
-                                    key={`${person.name}-${person.index}`}
-                                    className="monthly-name-text"
-                                  >
-                                    {person.name}
-                                  </span>
+                                  <div>
+                                    {booked.map((person) => {
+                                      const selected = isMonthlyBookingSelected(
+                                        selectedLocation.name,
+                                        iso,
+                                        entry.shift,
+                                        person.index
+                                      );
+
+                                      if (isAdminRoute && adminSession) {
+                                        return (
+                                          <button
+                                            key={`${person.name}-${person.index}`}
+                                            type="button"
+                                            onClick={() =>
+                                              toggleMonthlyBookingSelection(
+                                                selectedLocation.name,
+                                                iso,
+                                                entry.shift,
+                                                person.index
+                                              )
+                                            }
+                                            className={
+                                              selected
+                                                ? "monthly-name-chip selected"
+                                                : "monthly-name-chip"
+                                            }
+                                          >
+                                            {person.name}
+                                          </button>
+                                        );
+                                      }
+
+                                      return (
+                                        <span
+                                          key={`${person.name}-${person.index}`}
+                                          className="monthly-name-text"
+                                        >
+                                          {person.name}
+                                        </span>
+                                      );
+                                    })}
+
+                                    {waiting.length > 0 && (
+                                      <div style={{ marginTop: 6 }}>
+                                        <div className="sub-muted" style={{ fontSize: 12 }}>Waiting List</div>
+                                        {waiting.map((person) => (
+                                          isAdminRoute && adminSession ? (
+                                            <button
+                                              key={`${person.name}-w-${person.index}`}
+                                              type="button"
+                                              onClick={() =>
+                                                toggleMonthlyBookingSelection(
+                                                  selectedLocation.name,
+                                                  iso,
+                                                  entry.shift,
+                                                  person.index
+                                                )
+                                              }
+                                              className="monthly-waiting-chip"
+                                            >
+                                              {person.name}
+                                            </button>
+                                          ) : (
+                                            <span key={`${person.name}-w-${person.index}`} className="monthly-name-text">
+                                              {person.name}
+                                            </span>
+                                          )
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
                                 );
-                              })}
+                              })()}
                             </div>
                           </div>
                         ))}
