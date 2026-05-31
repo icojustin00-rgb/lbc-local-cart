@@ -1092,6 +1092,65 @@ input {
   box-shadow: inset 0 0 0 1px rgba(92, 57, 25, 0.1);
 }
 
+.hero-showcase {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 16px;
+  align-self: stretch;
+}
+
+.hero-slideshow {
+  isolation: isolate;
+  overflow: hidden;
+  min-height: 500px;
+  background: #fff9ea;
+  box-shadow:
+    0 28px 70px rgba(69, 42, 23, 0.24),
+    inset 0 0 0 1px rgba(92, 57, 25, 0.1);
+}
+
+.hero-slide {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  animation: heroFade 12s infinite;
+}
+
+.hero-slide img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+
+.hero-showcase .service-board {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  width: min(330px, 100%);
+  margin: 0 auto;
+  transform: none;
+}
+
+@keyframes heroFade {
+  0%,
+  28% {
+    opacity: 1;
+  }
+
+  35%,
+  93% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
 .window-arch {
   position: relative;
   display: grid;
@@ -1256,6 +1315,10 @@ input {
     min-height: 390px;
   }
 
+  .hero-slideshow {
+    min-height: 420px;
+  }
+
   .window-arch {
     width: min(300px, 76%);
     height: 330px;
@@ -1266,6 +1329,10 @@ input {
 @media (max-width: 700px) {
   .church-window {
     min-height: 330px;
+  }
+
+  .hero-slideshow {
+    min-height: 340px;
   }
 
   .window-arch {

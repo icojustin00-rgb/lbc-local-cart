@@ -103,6 +103,27 @@ const REMINDERS = [
   },
 ];
 
+const LANDING_HERO_SLIDES = [
+  {
+    mobileSrc: "/hero/local-cart-640.webp",
+    desktopSrc: "/hero/local-cart-1200.webp",
+    fallbackSrc: "/hero/local-cart.png",
+    alt: "Local Cart illustration",
+  },
+  {
+    mobileSrc: "/hero/kingdom-hall-640.webp",
+    desktopSrc: "/hero/kingdom-hall-1200.webp",
+    fallbackSrc: "/hero/kingdom-hall.png",
+    alt: "Kingdom Hall illustration",
+  },
+  {
+    mobileSrc: "/hero/local-cart-kingdom-hall-640.webp",
+    desktopSrc: "/hero/local-cart-kingdom-hall-1200.webp",
+    fallbackSrc: "/hero/local-cart-kingdom-hall.png",
+    alt: "Local Cart and Kingdom Hall illustration",
+  },
+];
+
 function pad(n) {
   return String(n).padStart(2, "0");
 }
@@ -1385,8 +1406,8 @@ export default function App() {
                 </p>
 
                 <div className="landing-service-card">
-                  <span>Today&apos;s Flow</span>
-                  <strong>Location first, then date, then publisher name.</strong>
+                  <span>How It Works</span>
+                  <strong>Choose a location, select a date, then book your shift.</strong>
                 </div>
 
                 <div className="landing-actions">
@@ -1408,15 +1429,32 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="church-window" aria-hidden="true">
-                <div className="window-arch">
-                  <div className="window-pane pane-gold" />
-                  <div className="window-pane pane-olive" />
-                  <div className="window-pane pane-cream" />
-                  <div className="window-pane pane-rust" />
+              <div className="hero-showcase">
+                <div className="church-window hero-slideshow" aria-label="Local Cart slideshow">
+                  {LANDING_HERO_SLIDES.map((slide, index) => (
+                    <picture
+                      key={slide.fallbackSrc}
+                      className="hero-slide"
+                      style={{ animationDelay: `${index * 4}s` }}
+                    >
+                      <source
+                        type="image/webp"
+                        media="(max-width: 700px)"
+                        srcSet={slide.mobileSrc}
+                      />
+                      <source type="image/webp" srcSet={slide.desktopSrc} />
+                      <img
+                        src={slide.fallbackSrc}
+                        alt={slide.alt}
+                        loading={index === 0 ? "eager" : "lazy"}
+                        decoding="async"
+                        fetchPriority={index === 0 ? "high" : "low"}
+                      />
+                    </picture>
+                  ))}
                 </div>
                 <div className="service-board">
-                  <span className="board-label">Cart Board</span>
+                  <span className="board-label">Local Cart</span>
                   <strong>3 Locations</strong>
                   <span>Kingdom Hall, Kalentong, Greenhills</span>
                 </div>
