@@ -275,8 +275,13 @@ function getDaySummary(locationName, dateStr, bookingMap, capacity) {
   const counts = shifts.map((shift) =>
     getShiftBookings(bookingMap, locationName, dateStr, shift).filter((e) => e.status === "booked").length
   );
-  const maxBooked = Math.max(0, ...counts);
-  const color = getAvailabilityStatus(maxBooked, capacity);
+  const totalBookings = counts.reduce((sum, count) => sum + count, 0);
+  const openShiftCount = counts.filter((count) => count < capacity).length;
+
+  let color = "empty";
+  if (totalBookings > 0 && openShiftCount === 0) color = "full";
+  else if (totalBookings > 0 && openShiftCount === 1) color = "almost";
+  else if (totalBookings > 0) color = "partial";
 
   return { color };
 }
