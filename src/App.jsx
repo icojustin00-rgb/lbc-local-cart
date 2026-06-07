@@ -98,6 +98,12 @@ const DEFAULT_PUBLISHERS = [
   "Yaninah Raga",
 ].sort((a, b) => a.localeCompare(b));
 
+function mergePublisherNames(names = []) {
+  return Array.from(new Set([...DEFAULT_PUBLISHERS, ...names].filter(Boolean))).sort(
+    (a, b) => a.localeCompare(b)
+  );
+}
+
 
 const STORAGE_KEY = "lbc-local-cart-cache";
 const WAITING_LIST_LIMIT = 2;
@@ -612,8 +618,13 @@ export default function App() {
       async (snap) => {
         if (snap.exists()) {
           const data = snap.data() || {};
-          const names = Array.isArray(data.names) ? data.names.filter(Boolean).sort((a, b) => a.localeCompare(b)) : DEFAULT_PUBLISHERS;
+          const names = Array.isArray(data.names)
+            ? mergePublisherNames(data.names)
+            : DEFAULT_PUBLISHERS;
           setPublishers(names);
+          if (!Array.isArray(data.names) || names.length !== data.names.filter(Boolean).length) {
+            await setDoc(publishersRef, { names }, { merge: true });
+          }
         } else {
           try {
             await setDoc(publishersRef, { names: DEFAULT_PUBLISHERS }, { merge: true });
