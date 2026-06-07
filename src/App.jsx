@@ -113,7 +113,7 @@ const ELDER_NAME = "Bro. Edjie Allado";
 const ELDER_MESSENGER = "https://www.facebook.com/edjie.allado";
 
 const JUSTIN_MESSENGER = "https://www.facebook.com/justin.ico.737";
-const GC_LINK = "https://m.me/YOURGROUPCHAT";
+const GC_LINK = "https://m.me/j/Abai9cTeQu6EHAoa/";
 
 const REMINDERS = [
   {
