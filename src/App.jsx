@@ -24,6 +24,7 @@ const LOCATIONS = [
     name: "Kalentong",
     capacity: 3,
     shifts: [
+      "06:00 AM - 08:00 AM",
       "08:00 AM - 10:00 AM",
       "02:00 PM - 04:00 PM",
       "04:00 PM - 06:00 PM",
@@ -260,6 +261,13 @@ function promoteWaitingBookings(entries, capacity) {
   });
 }
 
+function getAvailabilityStatus(booked, capacity) {
+  if (booked <= 0) return "empty";
+  if (booked >= capacity) return "full";
+  if (booked >= capacity - 1) return "almost";
+  return "partial";
+}
+
 function getDaySummary(locationName, dateStr, bookingMap, capacity) {
   const location = LOCATIONS.find((loc) => loc.name === locationName);
   const shifts = location?.shifts || [];
@@ -267,14 +275,8 @@ function getDaySummary(locationName, dateStr, bookingMap, capacity) {
   const counts = shifts.map((shift) =>
     getShiftBookings(bookingMap, locationName, dateStr, shift).filter((e) => e.status === "booked").length
   );
-  const total = counts.reduce((a, b) => a + b, 0);
-  const hasBookings = total > 0;
-  const allFull = counts.length > 0 && counts.every((count) => count >= capacity);
-  const allEmpty = counts.every((count) => count === 0);
-
-  let color = "empty";
-  if (allFull) color = "full";
-  else if (hasBookings && !allEmpty) color = "partial";
+  const maxBooked = Math.max(0, ...counts);
+  const color = getAvailabilityStatus(maxBooked, capacity);
 
   return { color };
 }
@@ -296,9 +298,17 @@ function getShiftCardStyle(booked, capacity) {
     };
   }
 
+  if (booked >= capacity - 1) {
+    return {
+      bar: "status-almost",
+      badge: "Almost Full",
+      badgeClass: "text-yellow",
+    };
+  }
+
   return {
     bar: "status-open",
-    badge: "Open",
+    badge: "Slots still available",
     badgeClass: "text-green",
   };
 }
@@ -1621,6 +1631,7 @@ export default function App() {
                   let cellClass = "calendar-cell";
                   if (!isCurrentMonth) cellClass += " blank";
                   else if (summary.color === "full") cellClass += " full";
+                  else if (summary.color === "almost") cellClass += " almost";
                   else if (summary.color === "partial") cellClass += " partial";
 
                   return (
@@ -1719,6 +1730,9 @@ export default function App() {
               </div>
               <div>
                 <span className="legend-box green" /> Slots still available
+              </div>
+              <div>
+                <span className="legend-box yellow" /> Almost Full
               </div>
               <div>
                 <span className="legend-box red" /> Full
@@ -1987,13 +2001,35 @@ export default function App() {
                     selectedLocation.name,
                     iso
                   );
+                  const summary = getDaySummary(
+                    selectedLocation.name,
+                    iso,
+                    bookingMap,
+                    selectedLocation.capacity
+                  );
+                  const monthDayClass =
+                    summary.color === "empty"
+                      ? "month-day tall"
+                      : `month-day tall ${summary.color}`;
 
                   return (
-                    <div key={iso} className="month-day tall">
+                    <div key={iso} className={monthDayClass}>
                       <div className="month-day-num">{cell.getDate()}</div>
                       <div className="month-entries">
-                        {entries.map((entry, idx) => (
-                          <div key={`${entry.shift}-${idx}`} className="month-entry">
+                        {entries.map((entry, idx) => {
+                          const bookedCount = entry.entries.filter(
+                            (person) => person.status === "booked"
+                          ).length;
+                          const entryStatus = getAvailabilityStatus(
+                            bookedCount,
+                            selectedLocation.capacity
+                          );
+
+                          return (
+                          <div
+                            key={`${entry.shift}-${idx}`}
+                            className={`month-entry ${entryStatus}`}
+                          >
                             <div className="month-entry-shift">
                               {compactShiftLabel(entry.shift)}
                             </div>
@@ -2079,7 +2115,8 @@ export default function App() {
                               })()}
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   );
