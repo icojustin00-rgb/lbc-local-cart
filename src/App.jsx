@@ -208,6 +208,33 @@ function compactShiftLabel(shift) {
     .replace("06:00 PM", "6:00 PM");
 }
 
+function compactMonthlyShiftLabel(shift) {
+  return shift
+    .replace("06:00 AM - 08:00 AM", "6-8 AM")
+    .replace("08:00 AM - 10:00 AM", "8-10 AM")
+    .replace("10:00 AM - 12:00 PM", "10 AM-12 PM")
+    .replace("12:00 PM - 02:00 PM", "12-2 PM")
+    .replace("02:00 PM - 04:00 PM", "2-4 PM")
+    .replace("04:00 PM - 06:00 PM", "4-6 PM");
+}
+
+function exportDateLabel(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00`);
+  return d.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function fileSafeName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function getCalendarGrid(monthDate) {
   const year = monthDate.getFullYear();
   const month = monthDate.getMonth();
@@ -610,6 +637,8 @@ export default function App() {
   const [monthlyCancelConfirmOpen, setMonthlyCancelConfirmOpen] = useState(false);
 
   const pinCardRef = useRef(null);
+  const calendarExportRef = useRef(null);
+  const summaryExportRef = useRef(null);
 
   const currentShifts = useMemo(() => {
     return selectedLocation?.shifts || [];
@@ -795,6 +824,35 @@ export default function App() {
   }, [activeTab, page, selectedShift]);
 
   const calendarCells = useMemo(() => getCalendarGrid(monthDate), [monthDate]);
+
+  const monthlyBookedScheduleRows = useMemo(() => {
+    const year = monthDate.getFullYear();
+    const month = monthDate.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const rows = [];
+
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const iso = `${year}-${pad(month + 1)}-${pad(day)}`;
+      const entries = getMonthlyEntries(bookingMap, selectedLocation.name, iso);
+
+      entries.forEach((entry) => {
+        const bookedNames = entry.entries
+          .filter((person) => person.status === "booked")
+          .map((person) => person.name);
+
+        if (bookedNames.length === 0) return;
+
+        rows.push({
+          dateStr: iso,
+          dateLabel: exportDateLabel(iso),
+          shift: compactMonthlyShiftLabel(entry.shift),
+          names: bookedNames,
+        });
+      });
+    }
+
+    return rows;
+  }, [bookingMap, monthDate, selectedLocation.name]);
 
   const filteredNames = useMemo(() => {
     const q = nameQuery.trim().toLowerCase();
@@ -1363,6 +1421,218 @@ export default function App() {
     }
   }
 
+  async function downloadElementAsPng(ref, fileName, fallbackMessage) {
+    if (!(isAdminRoute && adminSession) || !ref.current) return;
+
+    try {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+
+      const canvas = await html2canvas(ref.current, {
+        backgroundColor: "#fffaf0",
+        scale: 3,
+        useCORS: true,
+      });
+
+      const blob = await new Promise((resolve) =>
+        canvas.toBlob(resolve, "image/png")
+      );
+
+      if (!blob) throw new Error("Image creation failed");
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setCopyMessage("Export downloaded.");
+      window.setTimeout(() => setCopyMessage(""), 2500);
+    } catch (error) {
+      console.error(fallbackMessage, error);
+      setCopyMessage("Export failed. Please try a manual screenshot.");
+      window.setTimeout(() => setCopyMessage(""), 3000);
+    }
+  }
+
+  function exportCalendarImage() {
+    const fileName = `lbc-calendar-${fileSafeName(selectedLocation.name)}-${fileSafeName(
+      monthLabel(monthDate)
+    )}.png`;
+    downloadElementAsPng(calendarExportRef, fileName, "Calendar export failed");
+  }
+
+  function exportScheduleSummary() {
+    const fileName = `lbc-summary-${fileSafeName(selectedLocation.name)}-${fileSafeName(
+      monthLabel(monthDate)
+    )}.png`;
+    downloadElementAsPng(summaryExportRef, fileName, "Summary export failed");
+  }
+
+  function renderAvailabilityLegend(className = "legend") {
+    return (
+      <div className={className}>
+        <div>
+          <span className="legend-box gray" /> No booking
+        </div>
+        <div>
+          <span className="legend-box green" /> Available
+        </div>
+        <div>
+          <span className="legend-box yellow" /> Almost Full
+        </div>
+        <div>
+          <span className="legend-box red" /> Full
+        </div>
+      </div>
+    );
+  }
+
+  function renderMonthlyCalendarGrid({ exportMode = false } = {}) {
+    return (
+      <>
+        <div className="weekday-row wide">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
+            <div key={day} className="weekday">
+              {day}
+            </div>
+          ))}
+        </div>
+
+        <div className="calendar-grid monthly-grid">
+          {calendarCells.map((cell, index) => {
+            if (!cell) {
+              return <div key={index} className="month-day blank tall" />;
+            }
+
+            const iso = toISODate(cell);
+            const entries = getMonthlyEntries(
+              bookingMap,
+              selectedLocation.name,
+              iso
+            );
+            const summary = getDaySummary(
+              selectedLocation.name,
+              iso,
+              bookingMap,
+              selectedLocation.capacity
+            );
+            const monthDayClass =
+              summary.color === "empty"
+                ? "month-day tall"
+                : `month-day tall ${summary.color}`;
+
+            return (
+              <div key={iso} className={monthDayClass}>
+                <div className="month-day-num">{cell.getDate()}</div>
+                <div className="month-entries">
+                  {entries.map((entry, idx) => {
+                    const booked = entry.entries.filter((p) => p.status === "booked");
+                    const waiting = entry.entries.filter((p) => p.status === "waiting");
+                    const entryStatus = getAvailabilityStatus(
+                      booked.length,
+                      selectedLocation.capacity
+                    );
+
+                    return (
+                      <div
+                        key={`${entry.shift}-${idx}`}
+                        className={`month-entry ${entryStatus}`}
+                      >
+                        <div className="month-entry-shift">
+                          {compactMonthlyShiftLabel(entry.shift)}
+                        </div>
+                        <div className="month-entry-names">
+                          {booked.map((person) => {
+                            const selected = isMonthlyBookingSelected(
+                              selectedLocation.name,
+                              iso,
+                              entry.shift,
+                              person.index
+                            );
+
+                            if (!exportMode && isAdminRoute && adminSession) {
+                              return (
+                                <button
+                                  key={`${person.name}-${person.index}`}
+                                  type="button"
+                                  onClick={() =>
+                                    toggleMonthlyBookingSelection(
+                                      selectedLocation.name,
+                                      iso,
+                                      entry.shift,
+                                      person.index
+                                    )
+                                  }
+                                  className={
+                                    selected
+                                      ? "monthly-name-chip selected"
+                                      : "monthly-name-chip"
+                                  }
+                                >
+                                  {person.name}
+                                </button>
+                              );
+                            }
+
+                            return (
+                              <span
+                                key={`${person.name}-${person.index}`}
+                                className="monthly-name-text"
+                              >
+                                {person.name}
+                              </span>
+                            );
+                          })}
+
+                          {waiting.length > 0 && (
+                            <div className="monthly-waiting-group">
+                              <div className="sub-muted monthly-waiting-label">
+                                Waiting List
+                              </div>
+                              {waiting.map((person) =>
+                                !exportMode && isAdminRoute && adminSession ? (
+                                  <button
+                                    key={`${person.name}-w-${person.index}`}
+                                    type="button"
+                                    onClick={() =>
+                                      toggleMonthlyBookingSelection(
+                                        selectedLocation.name,
+                                        iso,
+                                        entry.shift,
+                                        person.index
+                                      )
+                                    }
+                                    className="monthly-waiting-chip"
+                                  >
+                                    {person.name}
+                                  </button>
+                                ) : (
+                                  <span
+                                    key={`${person.name}-w-${person.index}`}
+                                    className="monthly-name-text"
+                                  >
+                                    {person.name}
+                                  </span>
+                                )
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </>
+    );
+  }
+
   function renderMaintenanceBanner() {
     if (!currentMaintenance?.text || currentMaintenance.status === "done") return null;
 
@@ -1563,6 +1833,7 @@ export default function App() {
                 )}
               </div>
             </div>
+
           </div>
         )}
 
@@ -2143,6 +2414,12 @@ export default function App() {
                 <button onClick={copyMonthlySchedule} className="primary-btn">
                   Copy GC Format
                 </button>
+                <button onClick={exportCalendarImage} className="primary-btn">
+                  Export Calendar
+                </button>
+                <button onClick={exportScheduleSummary} className="secondary-btn">
+                  Export Summary
+                </button>
                 {selectedMonthlyBookings.length > 0 && (
                   <button
                     onClick={() => setMonthlyCancelConfirmOpen(true)}
@@ -2218,7 +2495,7 @@ export default function App() {
                             className={`month-entry ${entryStatus}`}
                           >
                             <div className="month-entry-shift">
-                              {compactShiftLabel(entry.shift)}
+                              {compactMonthlyShiftLabel(entry.shift)}
                             </div>
                             <div className="month-entry-names">
                               {(() => {
@@ -2310,6 +2587,52 @@ export default function App() {
                 })}
               </div>
             </div>
+
+            {renderAvailabilityLegend()}
+
+            {isAdminRoute && adminSession && (
+              <div className="export-stage" aria-hidden="true">
+                <div ref={calendarExportRef} className="export-card export-calendar-card">
+                  <div className="export-header">
+                    <div>
+                      <div className="export-kicker">LBC Local Cart Ministry</div>
+                      <h2>{monthLabel(monthDate)}</h2>
+                      <p>{selectedLocation.name}</p>
+                    </div>
+                  </div>
+                  {renderMonthlyCalendarGrid({ exportMode: true })}
+                </div>
+
+                <div ref={summaryExportRef} className="export-card export-summary-card">
+                  <div className="export-summary-header">
+                    <div className="export-kicker">LBC Local Cart Ministry</div>
+                    <h2>{monthLabel(monthDate)}</h2>
+                    <p>{selectedLocation.name}</p>
+                  </div>
+
+                  <div className="export-summary-list">
+                    {monthlyBookedScheduleRows.length === 0 ? (
+                      <div className="export-summary-empty">
+                        No booked schedules for this month.
+                      </div>
+                    ) : (
+                      monthlyBookedScheduleRows.map((row) => (
+                        <div
+                          key={`${row.dateStr}-${row.shift}-${row.names.join("-")}`}
+                          className="export-summary-row"
+                        >
+                          <div className="export-summary-date">{row.dateLabel}</div>
+                          <div className="export-summary-detail">
+                            <strong>{row.shift}</strong>
+                            <span>{row.names.join(", ")}</span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
