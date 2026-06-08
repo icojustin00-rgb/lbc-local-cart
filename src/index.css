@@ -1035,6 +1035,68 @@ input {
   color: #2f6b20;
   font-weight: 700;
 }
+
+.admin-table-tools {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin: 0 0 16px;
+}
+
+.admin-table-tools .search-input {
+  flex: 1 1 260px;
+}
+
+.admin-select {
+  min-width: 220px;
+  padding: 14px 16px;
+  border: 1px solid var(--line, #cfcfcf);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  color: inherit;
+  font: inherit;
+  box-shadow: var(--shadow-sm, none);
+}
+
+.admin-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line, #d0d0d0);
+  border-radius: var(--radius-md, 18px);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: var(--shadow-sm, 0 1px 4px rgba(0, 0, 0, 0.08));
+}
+
+.admin-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--line, #e0e0e0);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.admin-table th {
+  background: rgba(238, 245, 223, 0.9);
+  color: var(--muted, #555);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.admin-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.admin-table td:first-child {
+  font-weight: 700;
+}
 .month-entry-names {
   display: flex;
   flex-wrap: wrap;

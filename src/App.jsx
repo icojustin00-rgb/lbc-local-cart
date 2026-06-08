@@ -113,7 +113,6 @@ const ELDER_NAME = "Bro. Edjie Allado";
 const ELDER_MESSENGER = "https://www.facebook.com/edjie.allado";
 
 const JUSTIN_MESSENGER = "https://www.facebook.com/justin.ico.737";
-const GC_LINK = "https://m.me/j/Abai9cTeQu6EHAoa/";
 
 const REMINDERS = [
   {
@@ -183,6 +182,16 @@ function longDateLabel(dateStr) {
   return d.toLocaleDateString(undefined, {
     weekday: "long",
     month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function shortDateLabel(dateStr) {
+  if (!dateStr) return "None";
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString(undefined, {
+    month: "short",
     day: "numeric",
     year: "numeric",
   });
@@ -333,6 +342,76 @@ function getMonthlyEntries(bookingMap, locationName, dateStr) {
         index,
       })),
     }));
+}
+
+function buildParticipationSummary(bookingMap, publisherNames, todayIso) {
+  const summaryByName = new Map();
+
+  function ensureSummary(name) {
+    const cleanName = String(name || "").trim();
+    if (!cleanName) return null;
+
+    if (!summaryByName.has(cleanName)) {
+      summaryByName.set(cleanName, {
+        name: cleanName,
+        totalBookings: 0,
+        upcomingBookings: 0,
+        pastBookings: 0,
+        cancelledBookings: 0,
+        waitingListCount: 0,
+        lastBookedDate: "",
+      });
+    }
+
+    return summaryByName.get(cleanName);
+  }
+
+  (publisherNames || []).forEach((name) => ensureSummary(name));
+
+  Object.entries(isRecord(bookingMap) ? bookingMap : {}).forEach(([, locationData]) => {
+    if (!isRecord(locationData)) return;
+
+    Object.entries(locationData).forEach(([dateStr, dayData]) => {
+      if (!isRecord(dayData)) return;
+
+      Object.values(dayData).forEach((shiftEntries) => {
+        if (!Array.isArray(shiftEntries)) return;
+
+        shiftEntries.forEach((entry) => {
+          const normalized = normalizeBookingEntry(entry);
+          const row = ensureSummary(normalized.name);
+          if (!row) return;
+
+          const status = String(normalized.status || "booked").toLowerCase();
+
+          if (status === "waiting") {
+            row.waitingListCount += 1;
+            return;
+          }
+
+          if (status === "cancelled" || status === "canceled") {
+            row.cancelledBookings += 1;
+            return;
+          }
+
+          if (status !== "booked") return;
+
+          row.totalBookings += 1;
+          if (dateStr >= todayIso) {
+            row.upcomingBookings += 1;
+          } else {
+            row.pastBookings += 1;
+          }
+
+          if (!row.lastBookedDate || dateStr > row.lastBookedDate) {
+            row.lastBookedDate = dateStr;
+          }
+        });
+      });
+    });
+  });
+
+  return Array.from(summaryByName.values());
 }
 
 function buildMonthlyGcText(bookingMap, locationName, monthDate) {
@@ -524,6 +603,8 @@ export default function App() {
   const [adminSession, setAdminSession] = useState(false);
   const [adminDisplayName, setAdminDisplayName] = useState("");
   const [newPublisherName, setNewPublisherName] = useState("");
+  const [participationQuery, setParticipationQuery] = useState("");
+  const [participationSort, setParticipationSort] = useState("total");
 
   const [selectedMonthlyBookings, setSelectedMonthlyBookings] = useState([]);
   const [monthlyCancelConfirmOpen, setMonthlyCancelConfirmOpen] = useState(false);
@@ -544,6 +625,31 @@ export default function App() {
       isWithinShiftNotesWindow(selectedLocation, selectedDate, selectedShift)
     );
   }, [selectedLocation, selectedDate, selectedShift]);
+
+  const participationSummary = useMemo(() => {
+    const todayIso = toISODate(new Date());
+    const rows = buildParticipationSummary(bookingMap, publishers, todayIso);
+    const query = participationQuery.trim().toLowerCase();
+
+    return rows
+      .filter((row) => row.name.toLowerCase().includes(query))
+      .sort((a, b) => {
+        if (participationSort === "lastBooked") {
+          if (a.lastBookedDate !== b.lastBookedDate) {
+            return (b.lastBookedDate || "").localeCompare(a.lastBookedDate || "");
+          }
+        } else if (a.totalBookings !== b.totalBookings) {
+          return b.totalBookings - a.totalBookings;
+        }
+
+        return a.name.localeCompare(b.name);
+      });
+  }, [bookingMap, publishers, participationQuery, participationSort]);
+
+  const hasCancellationHistory = useMemo(
+    () => participationSummary.some((row) => row.cancelledBookings > 0),
+    [participationSummary]
+  );
 
   async function initFirestoreBookings() {
     const bookingsRef = doc(db, "cart", "bookings");
@@ -1393,6 +1499,14 @@ export default function App() {
                 Manage Names
               </button>
             )}
+            {isAdminRoute && adminSession && (
+              <button
+                onClick={() => setActiveTab("participation")}
+                className={activeTab === "participation" ? "tab-btn active" : "tab-btn"}
+              >
+                Participation
+              </button>
+            )}
           </div>
         )}
 
@@ -1448,6 +1562,74 @@ export default function App() {
                   ))
                 )}
               </div>
+            </div>
+          </div>
+        )}
+
+        {isAdminRoute && adminSession && activeTab === "participation" && (
+          <div className="section-wrap full">
+            <div className="section-header compact">
+              <h2 className="upper">Participation Summary</h2>
+              <div className="sub-strong">Publisher activity</div>
+              <div className="sub-muted">
+                Read-only summary calculated from existing booking data.
+              </div>
+            </div>
+
+            <div className="admin-table-tools">
+              <input
+                type="text"
+                value={participationQuery}
+                onChange={(e) => setParticipationQuery(e.target.value)}
+                placeholder="Search publisher"
+                className="search-input"
+              />
+              <select
+                value={participationSort}
+                onChange={(e) => setParticipationSort(e.target.value)}
+                className="admin-select"
+                aria-label="Sort participation summary"
+              >
+                <option value="total">Sort by total bookings</option>
+                <option value="lastBooked">Sort by last booked date</option>
+              </select>
+            </div>
+
+            <div className="admin-table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Publisher</th>
+                    <th>Total</th>
+                    <th>Upcoming</th>
+                    <th>Past/Completed</th>
+                    {hasCancellationHistory && <th>Cancelled</th>}
+                    <th>Waiting List</th>
+                    <th>Last Booked</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {participationSummary.length === 0 ? (
+                    <tr>
+                      <td colSpan={hasCancellationHistory ? 7 : 6}>
+                        No publishers match your search.
+                      </td>
+                    </tr>
+                  ) : (
+                    participationSummary.map((row) => (
+                      <tr key={row.name}>
+                        <td>{row.name}</td>
+                        <td>{row.totalBookings}</td>
+                        <td>{row.upcomingBookings}</td>
+                        <td>{row.pastBookings}</td>
+                        {hasCancellationHistory && <td>{row.cancelledBookings}</td>}
+                        <td>{row.waitingListCount}</td>
+                        <td>{shortDateLabel(row.lastBookedDate)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
@@ -2208,8 +2390,9 @@ export default function App() {
           <div className="modal-card support-card">
             <h3 className="modal-title">Forgot PIN?</h3>
             <p className="support-note">
-              If you forgot your PIN, please message us or chat in the GC so we
-              can manually cancel the slot for you.
+              Kung nakalimutan mo ang iyong PIN at kailangan mong mag-cancel,
+              mangyaring mag-message sa Local Cart Ministry GC o sa isa sa mga
+              admin upang matulungan kang ma-cancel ang iyong booking.
             </p>
 
             <div className="support-section">
@@ -2236,20 +2419,6 @@ export default function App() {
                   className="secondary-btn support-link"
                 >
                   Messenger
-                </a>
-              </div>
-            </div>
-
-            <div className="support-section">
-              <div className="support-name">Report to GC</div>
-              <div className="support-actions">
-                <a
-                  href={GC_LINK}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="primary-btn support-link"
-                >
-                  Open GC
                 </a>
               </div>
             </div>
