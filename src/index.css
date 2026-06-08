@@ -2502,8 +2502,9 @@ textarea:focus-visible {
 .monthly-waiting-chip,
 .monthly-name-text {
   max-width: 100%;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: break-word;
+  word-break: normal;
+  white-space: normal;
   line-height: 1.2;
 }
 
@@ -2863,9 +2864,15 @@ textarea:focus-visible {
   .monthly-name-chip,
   .monthly-waiting-chip,
   .monthly-name-text {
+    width: 100%;
+    flex: 1 1 100%;
     padding: 2px 4px;
     font-size: 8px;
     line-height: 1.15;
+    text-align: left;
+    overflow-wrap: break-word;
+    word-break: normal;
+    white-space: normal;
   }
 
   .monthly-waiting-label {
@@ -2982,6 +2989,7 @@ textarea:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
 }
 
 .monthly-name-chip {
@@ -2990,6 +2998,13 @@ textarea:focus-visible {
   padding: 4px 8px;
   font-size: 11px;
   cursor: pointer;
+  max-width: 100%;
+  min-width: 0;
+  line-height: 1.25;
+  text-align: left;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 
 .monthly-name-chip.selected {
@@ -3000,4 +3015,26 @@ textarea:focus-visible {
 
 .monthly-name-text {
   font-size: 11px;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 1.25;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+@media (max-width: 700px) {
+  .monthly-name-chip,
+  .monthly-waiting-chip,
+  .monthly-name-text {
+    width: 100%;
+    flex: 1 1 100%;
+    padding: 2px 4px;
+    font-size: 8px;
+    line-height: 1.15;
+    text-align: left;
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: break-word;
+  }
 }
