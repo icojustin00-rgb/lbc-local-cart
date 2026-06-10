@@ -99,10 +99,45 @@ const DEFAULT_PUBLISHERS = [
   "Yaninah Raga",
 ].sort((a, b) => a.localeCompare(b));
 
-function mergePublisherNames(names = []) {
-  return Array.from(new Set([...DEFAULT_PUBLISHERS, ...names].filter(Boolean))).sort(
-    (a, b) => a.localeCompare(b)
-  );
+function cleanPublisherName(name) {
+  return String(name || "").trim().replace(/\s+/g, " ");
+}
+
+function normalizeNameForSearch(value) {
+  return cleanPublisherName(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function getSearchForms(name) {
+  const normal = normalizeNameForSearch(name);
+  const parts = normal.split(" ").filter(Boolean);
+  const lastNameFirst =
+    parts.length >= 2 ? `${parts[parts.length - 1]} ${parts.slice(0, -1).join(" ")}` : normal;
+
+  return [normal, lastNameFirst, normal.replace(/\s+/g, ""), lastNameFirst.replace(/\s+/g, "")];
+}
+
+function normalizePublisherNames(names = []) {
+  const seen = new Set();
+  const normalized = [];
+
+  names.forEach((name) => {
+    const cleanName = cleanPublisherName(name);
+    if (!cleanName) return;
+
+    const key = normalizeNameForSearch(cleanName);
+    if (seen.has(key)) return;
+
+    seen.add(key);
+    normalized.push(cleanName);
+  });
+
+  return normalized.sort((a, b) => a.localeCompare(b));
 }
 
 
@@ -568,7 +603,8 @@ export default function App() {
   const [monthDate, setMonthDate] = useState(new Date());
   const [bookingMap, setBookingMap] = useState({});
   const [maintenanceMap, setMaintenanceMap] = useState({});
-  const [publishers, setPublishers] = useState(DEFAULT_PUBLISHERS);
+  const [publishers, setPublishers] = useState([]);
+  const [publishersLoading, setPublishersLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [searchTouched, setSearchTouched] = useState(false);
   const [copyMessage, setCopyMessage] = useState("");
@@ -769,23 +805,24 @@ export default function App() {
         if (snap.exists()) {
           const data = snap.data() || {};
           const names = Array.isArray(data.names)
-            ? mergePublisherNames(data.names)
-            : DEFAULT_PUBLISHERS;
+            ? normalizePublisherNames(data.names)
+            : [];
           setPublishers(names);
-          if (!Array.isArray(data.names) || names.length !== data.names.filter(Boolean).length) {
-            await setDoc(publishersRef, { names }, { merge: true });
-          }
+          setPublishersLoading(false);
         } else {
           try {
             await setDoc(publishersRef, { names: DEFAULT_PUBLISHERS }, { merge: true });
             setPublishers(DEFAULT_PUBLISHERS);
+            setPublishersLoading(false);
           } catch (error) {
             console.error("Error creating publishers document:", error);
+            setPublishersLoading(false);
           }
         }
       },
       (error) => {
         console.error("Error listening to publishers:", error);
+        setPublishersLoading(false);
       }
     );
 
@@ -855,20 +892,14 @@ export default function App() {
   }, [bookingMap, monthDate, selectedLocation.name]);
 
   const filteredNames = useMemo(() => {
-    const q = nameQuery.trim().toLowerCase();
+    const q = normalizeNameForSearch(nameQuery);
     if (!q) return [];
+    const compactQuery = q.replace(/\s+/g, "");
 
     return publishers.filter((name) => {
-      const normal = name.toLowerCase();
-      const parts = name.trim().split(" ");
-      const lastNameFirst =
-        parts.length >= 2
-          ? `${parts[parts.length - 1]} ${parts.slice(0, -1).join(" ")}`.toLowerCase()
-          : normal;
-
-      return normal.includes(q) || lastNameFirst.includes(q);
+      return getSearchForms(name).some((form) => form.includes(q) || form.includes(compactQuery));
     });
-  }, [nameQuery]);
+  }, [nameQuery, publishers]);
 
   const selectedShiftBookings = useMemo(() => {
     if (!selectedShift) return [];
@@ -911,13 +942,13 @@ export default function App() {
   }
 
   async function addPublisher() {
-    const name = newPublisherName.trim();
+    const name = cleanPublisherName(newPublisherName);
     if (!name) {
       setMessage("Please enter a publisher name.");
       return;
     }
 
-    const next = Array.from(new Set([...(publishers || []), name])).sort((a, b) => a.localeCompare(b));
+    const next = normalizePublisherNames([...(publishers || []), name]);
 
     try {
       const ref = doc(db, "cart", "publishers");
@@ -931,7 +962,10 @@ export default function App() {
   }
 
   async function removePublisher(name) {
-    const next = (publishers || []).filter((n) => n !== name);
+    const removeKey = normalizeNameForSearch(name);
+    const next = normalizePublisherNames(publishers || []).filter(
+      (publisherName) => normalizeNameForSearch(publisherName) !== removeKey
+    );
 
     try {
       const ref = doc(db, "cart", "publishers");
@@ -2252,10 +2286,16 @@ export default function App() {
                 </div>
               )}
 
-              {searchTouched && nameQuery.trim() !== "" && !selectedName && (
+              {publishersLoading && (
+                <div className="empty-box">Loading publisher names...</div>
+              )}
+
+              {!publishersLoading && searchTouched && nameQuery.trim() !== "" && !selectedName && (
                   <div className="search-results">
                     {filteredNames.length === 0 ? (
-                      <div className="empty-box">No matching names.</div>
+                      <div className="empty-box">
+                        No matching name found. Please check spelling or contact an admin.
+                      </div>
                     ) : (
                       filteredNames.map((name) => (
                         <button
