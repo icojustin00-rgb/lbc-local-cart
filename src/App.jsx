@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { db, auth } from "./firebase";
-import { doc, onSnapshot, setDoc } from "firebase/firestore";
+import { doc, onSnapshot, runTransaction, setDoc } from "firebase/firestore";
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
@@ -100,7 +100,11 @@ const DEFAULT_PUBLISHERS = [
 ].sort((a, b) => a.localeCompare(b));
 
 function cleanPublisherName(name) {
-  return String(name || "").trim().replace(/\s+/g, " ");
+  return String(name || "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\u00A0/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
 function normalizeNameForSearch(value) {
@@ -138,6 +142,22 @@ function normalizePublisherNames(names = []) {
   });
 
   return normalized.sort((a, b) => a.localeCompare(b));
+}
+
+async function updatePublisherNames(updater) {
+  const ref = doc(db, "cart", "publishers");
+
+  return runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(ref);
+    const currentNames =
+      snap.exists() && Array.isArray(snap.data()?.names)
+        ? normalizePublisherNames(snap.data().names)
+        : DEFAULT_PUBLISHERS;
+    const nextNames = normalizePublisherNames(updater(currentNames));
+
+    transaction.set(ref, { names: nextNames }, { merge: true });
+    return { currentNames, nextNames };
+  });
 }
 
 
@@ -810,14 +830,8 @@ export default function App() {
           setPublishers(names);
           setPublishersLoading(false);
         } else {
-          try {
-            await setDoc(publishersRef, { names: DEFAULT_PUBLISHERS }, { merge: true });
-            setPublishers(DEFAULT_PUBLISHERS);
-            setPublishersLoading(false);
-          } catch (error) {
-            console.error("Error creating publishers document:", error);
-            setPublishersLoading(false);
-          }
+          setPublishers(DEFAULT_PUBLISHERS);
+          setPublishersLoading(false);
         }
       },
       (error) => {
@@ -866,13 +880,16 @@ export default function App() {
     const year = monthDate.getFullYear();
     const month = monthDate.getMonth();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const todayIso = toISODate(new Date());
     const rows = [];
 
     for (let day = 1; day <= daysInMonth; day += 1) {
       const iso = `${year}-${pad(month + 1)}-${pad(day)}`;
+      if (iso < todayIso) continue;
+
       const entries = getMonthlyEntries(bookingMap, selectedLocation.name, iso);
 
-      entries.forEach((entry) => {
+      entries.forEach((entry, shiftIndex) => {
         const bookedNames = entry.entries
           .filter((person) => person.status === "booked")
           .map((person) => person.name);
@@ -883,12 +900,16 @@ export default function App() {
           dateStr: iso,
           dateLabel: exportDateLabel(iso),
           shift: compactMonthlyShiftLabel(entry.shift),
+          shiftOrder: shiftIndex,
           names: bookedNames,
         });
       });
     }
 
-    return rows;
+    return rows.sort((a, b) => {
+      if (a.dateStr !== b.dateStr) return a.dateStr.localeCompare(b.dateStr);
+      return a.shiftOrder - b.shiftOrder;
+    });
   }, [bookingMap, monthDate, selectedLocation.name]);
 
   const filteredNames = useMemo(() => {
@@ -948,13 +969,17 @@ export default function App() {
       return;
     }
 
-    const next = normalizePublisherNames([...(publishers || []), name]);
-
     try {
-      const ref = doc(db, "cart", "publishers");
-      await setDoc(ref, { names: next });
+      const { currentNames, nextNames } = await updatePublisherNames((currentNames) => [
+        ...currentNames,
+        name,
+      ]);
+      if (nextNames.length === currentNames.length) {
+        setMessage("That publisher name is already in the list.");
+      } else {
+        setMessage("Publisher list updated.");
+      }
       setNewPublisherName("");
-      setMessage("Publisher list updated.");
     } catch (error) {
       console.error("Error updating publishers:", error);
       setMessage("Failed to update publishers.");
@@ -963,13 +988,13 @@ export default function App() {
 
   async function removePublisher(name) {
     const removeKey = normalizeNameForSearch(name);
-    const next = normalizePublisherNames(publishers || []).filter(
-      (publisherName) => normalizeNameForSearch(publisherName) !== removeKey
-    );
 
     try {
-      const ref = doc(db, "cart", "publishers");
-      await setDoc(ref, { names: next });
+      await updatePublisherNames((currentNames) =>
+        currentNames.filter(
+          (publisherName) => normalizeNameForSearch(publisherName) !== removeKey
+        )
+      );
       setMessage("Publisher removed.");
     } catch (error) {
       console.error("Error removing publisher:", error);
@@ -1853,7 +1878,9 @@ export default function App() {
               </div>
 
               <div style={{ marginTop: 12 }}>
-                {(publishers || []).length === 0 ? (
+                {publishersLoading ? (
+                  <div className="empty-box">Loading publisher names...</div>
+                ) : (publishers || []).length === 0 ? (
                   <div className="empty-box">No publishers yet.</div>
                 ) : (
                   (publishers || []).map((name) => (
@@ -2290,7 +2317,7 @@ export default function App() {
                 <div className="empty-box">Loading publisher names...</div>
               )}
 
-              {!publishersLoading && searchTouched && nameQuery.trim() !== "" && !selectedName && (
+              {!publishersLoading && searchTouched && normalizeNameForSearch(nameQuery) !== "" && !selectedName && (
                   <div className="search-results">
                     {filteredNames.length === 0 ? (
                       <div className="empty-box">
@@ -2646,14 +2673,16 @@ export default function App() {
                 <div ref={summaryExportRef} className="export-card export-summary-card">
                   <div className="export-summary-header">
                     <div className="export-kicker">LBC Local Cart Ministry</div>
-                    <h2>{monthLabel(monthDate)}</h2>
-                    <p>{selectedLocation.name}</p>
+                    <h2>Schedule Summary</h2>
+                    <p>
+                      {monthLabel(monthDate)} - {selectedLocation.name}
+                    </p>
                   </div>
 
                   <div className="export-summary-list">
                     {monthlyBookedScheduleRows.length === 0 ? (
                       <div className="export-summary-empty">
-                        No booked schedules for this month.
+                        No upcoming booked schedules for this month.
                       </div>
                     ) : (
                       monthlyBookedScheduleRows.map((row) => (
