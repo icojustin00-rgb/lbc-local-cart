@@ -893,8 +893,11 @@ export default function App() {
         const bookedNames = entry.entries
           .filter((person) => person.status === "booked")
           .map((person) => person.name);
+        const waitingNames = entry.entries
+          .filter((person) => person.status === "waiting")
+          .map((person) => person.name);
 
-        if (bookedNames.length === 0) return;
+        if (bookedNames.length === 0 && waitingNames.length === 0) return;
 
         rows.push({
           dateStr: iso,
@@ -902,6 +905,7 @@ export default function App() {
           shift: compactMonthlyShiftLabel(entry.shift),
           shiftOrder: shiftIndex,
           names: bookedNames,
+          waitingNames,
         });
       });
     }
@@ -1097,27 +1101,33 @@ export default function App() {
     const nextBookingMap = isRecord(bookingMap)
       ? JSON.parse(JSON.stringify(bookingMap))
       : {};
+    const removalsByShift = new Map();
 
-    [...selectedMonthlyBookings]
-      .sort((a, b) => {
-        const [aLocation, aDate, aShift, aIndex] = a.split("|||");
-        const [bLocation, bDate, bShift, bIndex] = b.split("|||");
-        const aGroup = `${aLocation}|||${aDate}|||${aShift}`;
-        const bGroup = `${bLocation}|||${bDate}|||${bShift}`;
-
-        if (aGroup !== bGroup) return aGroup.localeCompare(bGroup);
-        return Number(bIndex) - Number(aIndex);
-      })
-      .forEach((key) => {
+    selectedMonthlyBookings.forEach((key) => {
       const [locationName, dateStr, shift, indexStr] = key.split("|||");
       const entryIndex = Number(indexStr);
+      if (!Number.isInteger(entryIndex) || entryIndex < 0) return;
 
+      const groupKey = buildMonthlySelectionKey(locationName, dateStr, shift, "");
+      if (!removalsByShift.has(groupKey)) {
+        removalsByShift.set(groupKey, {
+          locationName,
+          dateStr,
+          shift,
+          indexes: new Set(),
+        });
+      }
+
+      removalsByShift.get(groupKey).indexes.add(entryIndex);
+    });
+
+    removalsByShift.forEach(({ locationName, dateStr, shift, indexes }) => {
       const shiftEntries = nextBookingMap?.[locationName]?.[dateStr]?.[shift];
       if (!Array.isArray(shiftEntries)) return;
 
-      shiftEntries.splice(entryIndex, 1);
+      const remainingEntries = shiftEntries.filter((_, index) => !indexes.has(index));
       nextBookingMap[locationName][dateStr][shift] = promoteWaitingBookings(
-        shiftEntries,
+        remainingEntries,
         LOCATIONS.find((loc) => loc.name === locationName)?.capacity || 0
       );
     });
@@ -1144,18 +1154,17 @@ export default function App() {
       }
     });
 
-    setBookingMap(nextBookingMap);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextBookingMap));
-    setSelectedMonthlyBookings([]);
-    setMonthlyCancelConfirmOpen(false);
-    setMessage("Selected booking(s) cancelled.");
-
     try {
       const ref = doc(db, "cart", "bookings");
       await setDoc(ref, nextBookingMap);
+      setBookingMap(nextBookingMap);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextBookingMap));
+      setSelectedMonthlyBookings([]);
+      setMonthlyCancelConfirmOpen(false);
+      setMessage("Selected booking(s) cancelled.");
     } catch (error) {
       console.error("Error cancelling selected monthly bookings:", error);
-      setMessage("Cancelled locally first, but cloud sync failed.");
+      setMessage("Cloud sync failed. Selected booking(s) were not cancelled.");
     }
   }
 
@@ -1653,25 +1662,40 @@ export default function App() {
                               </div>
                               {waiting.map((person) =>
                                 !exportMode && isAdminRoute && adminSession ? (
-                                  <button
-                                    key={`${person.name}-w-${person.index}`}
-                                    type="button"
-                                    onClick={() =>
-                                      toggleMonthlyBookingSelection(
-                                        selectedLocation.name,
-                                        iso,
-                                        entry.shift,
-                                        person.index
-                                      )
-                                    }
-                                    className="monthly-waiting-chip"
-                                  >
-                                    {person.name}
-                                  </button>
+                                  (() => {
+                                    const selected = isMonthlyBookingSelected(
+                                      selectedLocation.name,
+                                      iso,
+                                      entry.shift,
+                                      person.index
+                                    );
+
+                                    return (
+                                      <button
+                                        key={`${person.name}-w-${person.index}`}
+                                        type="button"
+                                        onClick={() =>
+                                          toggleMonthlyBookingSelection(
+                                            selectedLocation.name,
+                                            iso,
+                                            entry.shift,
+                                            person.index
+                                          )
+                                        }
+                                        className={
+                                          selected
+                                            ? "monthly-waiting-chip selected"
+                                            : "monthly-waiting-chip"
+                                        }
+                                      >
+                                        {person.name}
+                                      </button>
+                                    );
+                                  })()
                                 ) : (
                                   <span
                                     key={`${person.name}-w-${person.index}`}
-                                    className="monthly-name-text"
+                                    className="monthly-waiting-name"
                                   >
                                     {person.name}
                                   </span>
@@ -2514,145 +2538,7 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="weekday-row wide">
-                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
-                  <div key={day} className="weekday">
-                    {day}
-                  </div>
-                ))}
-              </div>
-
-              <div className="calendar-grid monthly-grid">
-                {calendarCells.map((cell, index) => {
-                  if (!cell) return <div key={index} className="month-day blank tall" />;
-
-                  const iso = toISODate(cell);
-                  const entries = getMonthlyEntries(
-                    bookingMap,
-                    selectedLocation.name,
-                    iso
-                  );
-                  const summary = getDaySummary(
-                    selectedLocation.name,
-                    iso,
-                    bookingMap,
-                    selectedLocation.capacity
-                  );
-                  const monthDayClass =
-                    summary.color === "empty"
-                      ? "month-day tall"
-                      : `month-day tall ${summary.color}`;
-
-                  return (
-                    <div key={iso} className={monthDayClass}>
-                      <div className="month-day-num">{cell.getDate()}</div>
-                      <div className="month-entries">
-                        {entries.map((entry, idx) => {
-                          const bookedCount = entry.entries.filter(
-                            (person) => person.status === "booked"
-                          ).length;
-                          const entryStatus = getAvailabilityStatus(
-                            bookedCount,
-                            selectedLocation.capacity
-                          );
-
-                          return (
-                          <div
-                            key={`${entry.shift}-${idx}`}
-                            className={`month-entry ${entryStatus}`}
-                          >
-                            <div className="month-entry-shift">
-                              {compactMonthlyShiftLabel(entry.shift)}
-                            </div>
-                            <div className="month-entry-names">
-                              {(() => {
-                                const booked = entry.entries.filter((p) => p.status === "booked");
-                                const waiting = entry.entries.filter((p) => p.status === "waiting");
-
-                                return (
-                                  <div>
-                                    {booked.map((person) => {
-                                      const selected = isMonthlyBookingSelected(
-                                        selectedLocation.name,
-                                        iso,
-                                        entry.shift,
-                                        person.index
-                                      );
-
-                                      if (isAdminRoute && adminSession) {
-                                        return (
-                                          <button
-                                            key={`${person.name}-${person.index}`}
-                                            type="button"
-                                            onClick={() =>
-                                              toggleMonthlyBookingSelection(
-                                                selectedLocation.name,
-                                                iso,
-                                                entry.shift,
-                                                person.index
-                                              )
-                                            }
-                                            className={
-                                              selected
-                                                ? "monthly-name-chip selected"
-                                                : "monthly-name-chip"
-                                            }
-                                          >
-                                            {person.name}
-                                          </button>
-                                        );
-                                      }
-
-                                      return (
-                                        <span
-                                          key={`${person.name}-${person.index}`}
-                                          className="monthly-name-text"
-                                        >
-                                          {person.name}
-                                        </span>
-                                      );
-                                    })}
-
-                                    {waiting.length > 0 && (
-                                      <div style={{ marginTop: 6 }}>
-                                        <div className="sub-muted" style={{ fontSize: 12 }}>Waiting List</div>
-                                        {waiting.map((person) => (
-                                          isAdminRoute && adminSession ? (
-                                            <button
-                                              key={`${person.name}-w-${person.index}`}
-                                              type="button"
-                                              onClick={() =>
-                                                toggleMonthlyBookingSelection(
-                                                  selectedLocation.name,
-                                                  iso,
-                                                  entry.shift,
-                                                  person.index
-                                                )
-                                              }
-                                              className="monthly-waiting-chip"
-                                            >
-                                              {person.name}
-                                            </button>
-                                          ) : (
-                                            <span key={`${person.name}-w-${person.index}`} className="monthly-name-text">
-                                              {person.name}
-                                            </span>
-                                          )
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })()}
-                            </div>
-                          </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              {renderMonthlyCalendarGrid()}
             </div>
 
             {renderAvailabilityLegend()}
@@ -2687,13 +2573,19 @@ export default function App() {
                     ) : (
                       monthlyBookedScheduleRows.map((row) => (
                         <div
-                          key={`${row.dateStr}-${row.shift}-${row.names.join("-")}`}
+                          key={`${row.dateStr}-${row.shift}-${row.names.join("-")}-${row.waitingNames.join("-")}`}
                           className="export-summary-row"
                         >
                           <div className="export-summary-date">{row.dateLabel}</div>
                           <div className="export-summary-detail">
                             <strong>{row.shift}</strong>
-                            <span>{row.names.join(", ")}</span>
+                            {row.names.length > 0 && <span>{row.names.join(", ")}</span>}
+                            {row.waitingNames.length > 0 && (
+                              <div className="export-summary-waiting">
+                                <small>Waiting List</small>
+                                <span>{row.waitingNames.join(", ")}</span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       ))
