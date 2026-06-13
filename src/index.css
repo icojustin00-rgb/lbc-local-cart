@@ -3099,3 +3099,152 @@ textarea:focus-visible {
     overflow-wrap: break-word;
   }
 }
+
+.month-day.tall[role="button"] {
+  cursor: pointer;
+}
+
+.month-day.tall[role="button"]:hover,
+.month-day.tall[role="button"]:focus-visible {
+  border-color: rgba(217, 138, 20, 0.55);
+  box-shadow: var(--shadow-md, 0 8px 24px rgba(0, 0, 0, 0.12));
+}
+
+.monthly-name-chip,
+.monthly-waiting-chip,
+.monthly-name-text,
+.monthly-waiting-name {
+  display: block;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.monthly-name-chip,
+.monthly-waiting-chip {
+  text-align: left;
+}
+
+.monthly-detail-card {
+  max-width: 680px;
+}
+
+.monthly-detail-list {
+  display: grid;
+  gap: 14px;
+}
+
+.monthly-detail-shift {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line, #d0d0d0);
+  border-left: 7px solid var(--slate-soft, #cbd5e1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: var(--shadow-sm, 0 1px 4px rgba(0, 0, 0, 0.08));
+}
+
+.monthly-detail-shift.status-open {
+  border-left-color: var(--olive, #4f6f2f);
+  background: rgba(238, 245, 223, 0.78);
+}
+
+.monthly-detail-shift.status-almost {
+  border-left-color: var(--yellow, #facc15);
+  background: rgba(255, 246, 214, 0.86);
+}
+
+.monthly-detail-shift.status-full {
+  border-left-color: var(--red, #b91c1c);
+  background: rgba(255, 240, 238, 0.86);
+}
+
+.monthly-detail-shift-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.monthly-detail-label {
+  margin-bottom: 4px;
+  color: var(--muted, #666);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.monthly-detail-status {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.monthly-detail-meta,
+.monthly-detail-empty {
+  color: var(--muted, #666);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.monthly-detail-section {
+  display: grid;
+  gap: 6px;
+}
+
+.monthly-detail-names {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  line-height: 1.35;
+}
+
+.monthly-detail-names.waiting {
+  color: #7a5200;
+}
+
+@media (max-width: 700px) {
+  .monthly-name-chip,
+  .monthly-waiting-chip,
+  .monthly-name-text {
+    overflow: hidden;
+    overflow-wrap: normal;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    word-break: normal;
+  }
+
+  .monthly-detail-overlay {
+    align-items: flex-end;
+    padding: 10px;
+  }
+
+  .monthly-detail-card {
+    max-height: min(86vh, 720px);
+    border-radius: 24px 24px 18px 18px;
+  }
+
+  .monthly-detail-shift {
+    padding: 14px;
+  }
+
+  .monthly-detail-shift-head {
+    display: grid;
+  }
+}
+
+.export-card .monthly-name-text,
+.export-card .monthly-waiting-name {
+  display: inline-block;
+  overflow: visible;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  white-space: normal;
+}

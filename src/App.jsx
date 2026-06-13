@@ -691,6 +691,7 @@ export default function App() {
 
   const [selectedMonthlyBookings, setSelectedMonthlyBookings] = useState([]);
   const [monthlyCancelConfirmOpen, setMonthlyCancelConfirmOpen] = useState(false);
+  const [selectedMonthlyDay, setSelectedMonthlyDay] = useState(null);
 
   const pinCardRef = useRef(null);
   const calendarExportRef = useRef(null);
@@ -866,6 +867,7 @@ export default function App() {
   useEffect(() => {
     setSelectedMonthlyBookings([]);
     setMonthlyCancelConfirmOpen(false);
+    setSelectedMonthlyDay(null);
   }, [selectedLocation, monthDate]);
 
   useEffect(() => {
@@ -1092,6 +1094,14 @@ export default function App() {
   function isMonthlyBookingSelected(locationName, dateStr, shift, entryIndex) {
     const key = buildMonthlySelectionKey(locationName, dateStr, shift, entryIndex);
     return selectedMonthlyBookings.includes(key);
+  }
+
+  function openMonthlyDayDetail(dateStr) {
+    setSelectedMonthlyDay(dateStr);
+  }
+
+  function closeMonthlyDayDetail() {
+    setSelectedMonthlyDay(null);
   }
 
   async function cancelSelectedMonthlyBookings() {
@@ -1591,9 +1601,23 @@ export default function App() {
               summary.color === "empty"
                 ? "month-day tall"
                 : `month-day tall ${summary.color}`;
+            const dayClickProps = exportMode
+              ? {}
+              : {
+                  role: "button",
+                  tabIndex: 0,
+                  onClick: () => openMonthlyDayDetail(iso),
+                  onKeyDown: (event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      openMonthlyDayDetail(iso);
+                    }
+                  },
+                  "aria-label": `View details for ${longDateLabel(iso)}`,
+                };
 
             return (
-              <div key={iso} className={monthDayClass}>
+              <div key={iso} className={monthDayClass} {...dayClickProps}>
                 <div className="month-day-num">{cell.getDate()}</div>
                 <div className="month-entries">
                   {entries.map((entry, idx) => {
@@ -1626,14 +1650,15 @@ export default function App() {
                                 <button
                                   key={`${person.name}-${person.index}`}
                                   type="button"
-                                  onClick={() =>
+                                  onClick={(event) => {
+                                    event.stopPropagation();
                                     toggleMonthlyBookingSelection(
                                       selectedLocation.name,
                                       iso,
                                       entry.shift,
                                       person.index
-                                    )
-                                  }
+                                    );
+                                  }}
                                   className={
                                     selected
                                       ? "monthly-name-chip selected"
@@ -1674,14 +1699,15 @@ export default function App() {
                                       <button
                                         key={`${person.name}-w-${person.index}`}
                                         type="button"
-                                        onClick={() =>
+                                        onClick={(event) => {
+                                          event.stopPropagation();
                                           toggleMonthlyBookingSelection(
                                             selectedLocation.name,
                                             iso,
                                             entry.shift,
                                             person.index
-                                          )
-                                        }
+                                          );
+                                        }}
                                         className={
                                           selected
                                             ? "monthly-waiting-chip selected"
@@ -2597,6 +2623,101 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {selectedMonthlyDay && (
+        <div
+          className="modal-overlay monthly-detail-overlay"
+          onClick={closeMonthlyDayDetail}
+        >
+          <div
+            className="modal-card monthly-detail-card"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 className="modal-title">Day Details</h3>
+            <p className="modal-subtitle">
+              {longDateLabel(selectedMonthlyDay)} - {selectedLocation.name}
+            </p>
+
+            <div className="monthly-detail-list">
+              {(selectedLocation.shifts || []).map((shift) => {
+                const entries = getShiftBookings(
+                  bookingMap,
+                  selectedLocation.name,
+                  selectedMonthlyDay,
+                  shift
+                );
+                const booked = entries.filter((entry) => entry.status === "booked");
+                const waiting = entries.filter((entry) => entry.status === "waiting");
+                const remaining = Math.max(0, selectedLocation.capacity - booked.length);
+                const style = getShiftCardStyle(booked.length, selectedLocation.capacity);
+                const waitingAvailable = Math.max(0, WAITING_LIST_LIMIT - waiting.length);
+
+                return (
+                  <div key={shift} className={`monthly-detail-shift ${style.bar}`}>
+                    <div className="monthly-detail-shift-head">
+                      <div>
+                        <div className="monthly-detail-label">Shift time</div>
+                        <strong>{shift}</strong>
+                      </div>
+                      <span className={`monthly-detail-status ${style.badgeClass}`}>
+                        {style.badge}
+                      </span>
+                    </div>
+
+                    <div className="monthly-detail-meta">
+                      {booked.length}/{selectedLocation.capacity} booked
+                      {remaining > 0
+                        ? ` - ${remaining} slot${remaining === 1 ? "" : "s"} available`
+                        : " - booking slots full"}
+                      {waiting.length > 0 &&
+                        ` - ${waiting.length}/${WAITING_LIST_LIMIT} waiting`}
+                      {remaining === 0 &&
+                        waitingAvailable > 0 &&
+                        ` - waiting list has ${waitingAvailable} opening${
+                          waitingAvailable === 1 ? "" : "s"
+                        }`}
+                    </div>
+
+                    <div className="monthly-detail-section">
+                      <div className="booked-title">Booked Publishers</div>
+                      {booked.length > 0 ? (
+                        <ul className="monthly-detail-names">
+                          {booked.map((entry, index) => (
+                            <li key={`${entry.name}-${entry.bookedAt || index}`}>
+                              {entry.name}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <div className="monthly-detail-empty">No booked publishers yet.</div>
+                      )}
+                    </div>
+
+                    {waiting.length > 0 && (
+                      <div className="monthly-detail-section">
+                        <div className="booked-title">Waiting List Publishers</div>
+                        <ul className="monthly-detail-names waiting">
+                          {waiting.map((entry, index) => (
+                            <li key={`${entry.name}-waiting-${entry.bookedAt || index}`}>
+                              {entry.name}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="center-row">
+              <button onClick={closeMonthlyDayDetail} className="secondary-btn">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {cancelModalOpen && (
         <div className="modal-overlay">
